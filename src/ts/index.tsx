@@ -22,13 +22,13 @@ import
 	SteamAppAchievement,
 	SteamAppOverview
 } from "./SteamTypes";
-import { checkOnlineStatus, waitForOnline } from "./steam-utils";
+import { waitForOnline } from "./steam-utils";
 import { EventBus, MountManager } from "./System";
 import { patchAppPage } from "./RoutePatches";
 import { runInAction } from "mobx";
 import { getTranslateFunc } from "./useTranslations";
 import { GameListComponent } from "./components/gameListComponent";
-import { StoreCategory } from "./AchievementsManager"
+import { StoreCategory } from "./managers/Manager";
 declare global
 {
 	// @ts-ignore
@@ -130,13 +130,16 @@ export default definePlugin(function ()
 					//console.log(args, appStore.GetAppOverviewByAppID(args[0]), appDetailsStore.GetAppDetails(args[0]));
 					if (appStore.GetAppOverviewByAppID(args[0])?.app_type === 1073741824 && !Achievements.m_mapGlobalAchievements.has(args[0]))
 					{
-						let data = state.managers.achievementManager.fetchAchievements(args[0]);
-						logger.debug(data.global);
-						if (!data.global.loading)
-							Achievements.m_mapGlobalAchievements.set(args[0], data.global);
-						logger.debug(data.user);
-						if (!data.user.loading)
-							Achievements.m_mapMyAchievements.set(args[0], data.user);
+						let manager = state.managers.find(m => m.isSupported(args[0]));
+						if(manager){
+							let data = manager.fetchAchievements(args[0]);
+							logger.debug(data.global);
+							if (!data.global.loading)
+								Achievements.m_mapGlobalAchievements.set(args[0], data.global);
+							logger.debug(data.user);
+							if (!data.user.loading)
+								Achievements.m_mapMyAchievements.set(args[0], data.user);
+						}
 						return;
 					}
 					return callOriginal;
@@ -158,7 +161,9 @@ export default definePlugin(function ()
 					if ((this as SteamAppOverview).app_type == 1073741824)
 					{
 						// @ts-ignore
-						if (state.settings.general.store_category && state.managers.achievementManager.isReady((this as SteamAppOverview).appid) && args[0] === StoreCategory.Achievements)
+						if (state.settings.general.store_category &&
+							state.managers.some(m => m.isReady((this as SteamAppOverview).appid)) &&
+							args[0] === StoreCategory.Achievements)
 						{
 							return true;
 						}
@@ -175,33 +180,36 @@ export default definePlugin(function ()
 		if (appData && !appData.bLoadingAchievments && appData.details.achievements.nTotal === 0)
 		{
 			appData.bLoadingAchievments = true;
-			const achievements = state.managers.achievementManager.fetchAchievements(appid);
-			if (achievements.user.data)
-			{
-				const nAchieved = Object.keys(achievements.user.data.achieved).length;
-				const nTotal = Object.keys(achievements.user.data.achieved).length + Object.keys(achievements.user.data.unachieved).length;
-				const vecHighlight: SteamAppAchievement[] = [];
-				Object.entries(achievements.user.data.achieved).forEach(([, value]) =>
+			let manager = state.managers.find(m => m.isSupported(appid));
+			if(manager){
+				const achievements = manager.fetchAchievements(appid);
+				if (achievements.user.data)
 				{
-					vecHighlight.push(value);
-				});
-				const vecUnachieved: SteamAppAchievement[] = [];
-				Object.entries(achievements.user.data.unachieved).forEach(([, value]) =>
-				{
-					vecUnachieved.push(value);
-				});
-				runInAction(() =>
-				{
-					appData.details.achievements = {
-						nAchieved,
-						nTotal,
-						vecAchievedHidden: [],
-						vecHighlight,
-						vecUnachieved
-					};
-					logger.debug("achievementsCachedData", appData.details.achievements);
-					appDetailsCache.SetCachedDataForApp(appid, "achievements", 2, appData.details.achievements);
-				});
+					const nAchieved = Object.keys(achievements.user.data.achieved).length;
+					const nTotal = Object.keys(achievements.user.data.achieved).length + Object.keys(achievements.user.data.unachieved).length;
+					const vecHighlight: SteamAppAchievement[] = [];
+					Object.entries(achievements.user.data.achieved).forEach(([, value]) =>
+					{
+						vecHighlight.push(value);
+					});
+					const vecUnachieved: SteamAppAchievement[] = [];
+					Object.entries(achievements.user.data.unachieved).forEach(([, value]) =>
+					{
+						vecUnachieved.push(value);
+					});
+					runInAction(() =>
+					{
+						appData.details.achievements = {
+							nAchieved,
+							nTotal,
+							vecAchievedHidden: [],
+							vecHighlight,
+							vecUnachieved
+						};
+						logger.debug("achievementsCachedData", appData.details.achievements);
+						appDetailsCache.SetCachedDataForApp(appid, "achievements", 2, appData.details.achievements);
+					});
+				}
 			}
 			appData.bLoadingAchievments = false;
 		}
@@ -229,7 +237,7 @@ export default definePlugin(function ()
 				"BIsStreamingRemotePlayTogetherGame",
 				_ =>
 				{
-					if (state.managers.achievementManager.isReady((Router.MainRunningApp as SteamAppOverview | undefined)?.appid ?? 0))
+					if (state.managers.some(m => m.isReady((Router.MainRunningApp as SteamAppOverview | undefined)?.appid ?? 0)))
 					{
 						setAchievements((Router.MainRunningApp as SteamAppOverview | undefined)?.appid ?? 0);
 					}
@@ -268,8 +276,11 @@ export default definePlugin(function ()
 				{
 					if (!update.bRunning)
 					{
-						state.managers.achievementManager.clearRuntimeCacheForAppId(update.unAppID);
-						state.managers.achievementManager.fetchAchievements(update.unAppID);
+						let manager = state.managers.find(m => m.isSupported(update.unAppID));
+						if(manager){
+							manager.clearRuntimeCacheForAppId(update.unAppID);
+							manager.fetchAchievements(update.unAppID);
+						}
 					}
 				}
 			});
@@ -285,14 +296,8 @@ export default definePlugin(function ()
 	mountManager.addMount({
 		mount: async function (): Promise<void>
 		{
-			if (await checkOnlineStatus())
-			{
-				await state.init();
-			} else
-			{
-				await waitForOnline();
-				await state.init();
-			}
+			await waitForOnline();
+			await state.init();
 		},
 		unMount: async function (): Promise<void>
 		{

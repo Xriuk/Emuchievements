@@ -10,7 +10,7 @@
 	"settingsCustomIdsOverridesSave": "Save",
 	"settingsCustomIdsOverridesAddRow": "Add row",
 	"settingsInstructions": "Istruzioni",
-	"settingsInstructionsMD": "Per ottenere la tua chiave api, vai su [https://retroachievements.org/controlpanel.php](https://retroachievements. rg/controlpanel.php) e accedi al tuo account. Dovresti vedere la tua chiave API in una delle voci di quella pagina. o digitare fuori nella casella chiave api qui sotto o andare in modalità desktop e avviare vapore in modalità immagine grande in modo che si ha accesso agli appunti e incollare in,",
+	"settingsInstructionsMD": "Per ottenere la tua chiave api, vai su [https://retroachievements.org/controlpanel.php](https://retroachievements.org/controlpanel.php) e accedi al tuo account. Dovresti vedere la tua chiave API in una delle voci di quella pagina. o digitare fuori nella casella chiave api qui sotto o andare in modalità desktop e avviare vapore in modalità immagine grande in modo che si ha accesso agli appunti e incollare in,",
 	"settingsUsername": "Utente: ",
 	"settingsAPIKey": "Chiave API: ",
 	"loginSuccess": "Login Riuscito",
@@ -18,13 +18,13 @@
 	"settingsReset": "Le impostazioni dello schema JSON sono cambiate, reimpostando JSON",
 	"title": "Emuchievements",
 	"settings": "Impostazioni",
-	"achievements": "Risultati",
+	"achievements": "Achievement",
 	"refresh": "Ricarica",
 	"clear": "Cancella Cache",
 	"loading": "Caricamento",
 	"fetching": "Recupero",
 	"error": "Errore",
-	"noAchievements": "Nessun Risultato Trovato",
+	"noAchievements": "Nessun achievement trovato",
 	"foundAchievements": "Caricato %%, Hash: %%",
-	"noLogin": "Non sei connesso! Effettua il login per visualizzare gli obiettivi."
+	"noLogin": "Non sei connesso! Effettua il login per visualizzare gli achievement."
 }

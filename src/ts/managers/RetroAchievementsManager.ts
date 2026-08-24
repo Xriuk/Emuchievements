@@ -1,22 +1,23 @@
 import { sleep } from "@decky/ui";
 import { call, fetchNoCors, toaster } from "@decky/api";
-import { rawGameToGame, retroAchievementToSteamAchievement } from "./Mappers";
-import Logger from "./logger";
-import { EmuchievementsState } from "./hooks/achievementsContext";
+import { rawGameToGame, retroAchievementToSteamAchievement } from "../Mappers";
+import Logger from "../logger";
+import { EmuchievementsState } from "../hooks/achievementsContext";
 import
 {
 	checkOnlineStatus,
 	getAllNonSteamAppIds,
 	getAppDetails,
 	waitForOnline,
-} from "./steam-utils";
-import { AllAchievements, GlobalAchievements } from "./SteamTypes";
+} from "../steam-utils";
+import { AllAchievements, GlobalAchievements } from "../SteamTypes";
 import { Promise } from "bluebird";
 import { runInAction } from "mobx";
-import { format, getTranslateFunc } from "./useTranslations";
+import { format, getTranslateFunc } from "../useTranslations";
 import throttledQueue from "throttled-queue";
-import { CacheData, CustomIdsOverrides } from "./settings";
+import { CacheData, CustomIdsOverrides } from "../settings";
 import { GameInfoAndUserProgress as Game, GetGameInfoAndUserProgressResponse as GameRaw } from "@retroachievements/api";
+import { loadingFetchedAchievements, type AchievementsProgress, type FetchedAchievements, type Manager } from "./Manager";
 
 // localforage.config({
 // 	name: "emuchievements",
@@ -27,40 +28,6 @@ import { GameInfoAndUserProgress as Game, GetGameInfoAndUserProgressResponse as 
 const romRegex =
 	'(\\/([^/"])+)+(?!\\.AppImage)(\\.zip|\\.7z|\\.iso|\\.bin|\\.chd|\\.cue|\\.img|\\.a26|\\.lnx|\\.ngp|\\.ngc|\\.elf|\\.n64|\\.ndd|\\.u1|\\.v64|\\.z64|\\.nds|\\.dmg|\\.gbc|\\.gba|\\.gb|\\.ciso|\\.cso|\\.rom|\\.nes|\\.fds|\\.unif|\\.unf|\\.32x|\\.cdi|\\.gdi|\\.m3u|\\.gg|\\.gen|\\.smd|\\.sms|\\.ecm|\\.mds|\\.pbp|\\.dump|\\.gz|\\.mdf|\\.mrg|\\.prx|\\.bs|\\.fig|\\.sfc|\\.smc|\\.swx|\\.pc2|\\.wsc|\\.ws|\\.md|\\.gcm|\\.gcz|\\.rvz|\\.wad|\\.wia|\\.wbfs)';
 
-export interface Manager
-{
-	state: EmuchievementsState;
-
-	init(): Promise<void>;
-
-	deinit(): Promise<void>;
-
-	refresh(): Promise<void>;
-}
-
-export enum StoreCategory
-{
-	MultiPlayer = 1,
-	SinglePlayer = 2,
-	CoOp = 9,
-	PartialController = 18,
-	MMO = 20,
-	Achievements = 22,
-	SteamCloud = 23,
-	SplitScreen = 24,
-	CrossPlatformMultiPlayer = 27,
-	FullController = 28,
-	TradingCards = 29,
-	Workshop = 30,
-	VRSupport = 31,
-	OnlineMultiPlayer = 36,
-	LocalMultiPlayer = 37,
-	OnlineCoOp = 38,
-	LocalCoOp = 392,
-	RemotePlayTogether = 44,
-	HighQualitySoundtrackAudio = 50
-}
-
 export interface AchievementsData
 {
 	game: Game,
@@ -69,35 +36,17 @@ export interface AchievementsData
 	md5: string;
 }
 
-export interface AchievementsProgress
+export interface RetroAchievementsProgress extends AchievementsProgress
 {
-	achieved: number;
-	total: number;
-	percentage: number;
 	data: AchievementsData;
 }
 
-export interface AchievementsProgress
+export interface FetchedRetroAchievements extends FetchedAchievements
 {
-	achieved: number,
-	total: number,
-	percentage: number;
-}
-
-export interface FetchedAchievements
-{
-	user: AllAchievements,
-	global: GlobalAchievements,
 	retro?: AchievementsData;
 }
 
-const loadingFetchedAchievements: FetchedAchievements = {
-	user: { loading: true },
-	global: { loading: true },
-	retro: undefined,
-};
-
-export class AchievementManager implements Manager
+export class RetroAchievementsManager implements Manager
 {
 	private t = getTranslateFunc();
 
@@ -221,7 +170,7 @@ export class AchievementManager implements Manager
 
 	private loading: Record<number, boolean> = { 0: false };
 
-	private logger: Logger = new Logger("AchievementManager");
+	private logger: Logger = new Logger("RetroAchievementsManager");
 
 	public clearRuntimeCache()
 	{
@@ -438,7 +387,7 @@ export class AchievementManager implements Manager
 		}
 	}
 
-	processRetroAchievements(retro: AchievementsData): FetchedAchievements
+	processRetroAchievements(retro: AchievementsData): FetchedRetroAchievements
 	{
 		if (Object.values(retro.game.achievements).length == 0)
 		{
@@ -482,7 +431,7 @@ export class AchievementManager implements Manager
 		};
 	}
 
-	fetchAchievements(app_id: number): FetchedAchievements
+	fetchAchievements(app_id: number): FetchedRetroAchievements
 	{
 		const loading = this.loading[app_id] ?? this.loading[0];
 		const user = this.userAchievements[app_id] ?? this.achievements[0];
@@ -501,7 +450,7 @@ export class AchievementManager implements Manager
 					.then(
 						(
 							retro?: AchievementsData
-						): FetchedAchievements =>
+						): FetchedRetroAchievements =>
 						{
 							if (retro && retro.game.achievements)
 							{
@@ -536,7 +485,7 @@ export class AchievementManager implements Manager
 		}
 	}
 
-	fetchAchievementsProgress(app_id: number): AchievementsProgress | undefined
+	fetchAchievementsProgress(app_id: number): RetroAchievementsProgress | undefined
 	{
 		const achievements = this.fetchAchievements(app_id);
 		this.logger.debug("Achievements progress", achievements);
@@ -551,13 +500,13 @@ export class AchievementManager implements Manager
 				achieved,
 				total,
 				percentage: (achieved / total) * 100,
-				data: achievements.retro,
+				data: achievements.retro
 			};
 		}
 		return;
 	}
 
-	async fetchAchievementsAsync(app_id: number): Promise<FetchedAchievements | undefined>
+	async fetchAchievementsAsync(app_id: number): Promise<FetchedRetroAchievements | undefined>
 	{
 		const loading = this.loading[app_id] ?? this.loading[0];
 		const user = this.userAchievements[app_id] ?? this.achievements[0];
@@ -577,7 +526,7 @@ export class AchievementManager implements Manager
 					.then(
 						(
 							retro?: AchievementsData
-						): FetchedAchievements =>
+						): FetchedRetroAchievements =>
 						{
 							if (retro && retro.game.achievements)
 							{
@@ -822,6 +771,10 @@ export class AchievementManager implements Manager
 	}
 
 	async deinit(): Promise<void> { }
+
+	isSupported(steamAppId: number): boolean {
+		return !!this.ids[steamAppId];
+	}
 
 	isReady(steamAppId: number): boolean
 	{

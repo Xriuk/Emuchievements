@@ -203,7 +203,7 @@ export class Settings
 		const release = await this.mutex.acquire();
 		try
 		{
-			const buffer = JSON.stringify(this.data, undefined, "\t");
+			const buffer = JSON.stringify(this.data);
 			const length = Math.ceil(buffer.length / this.packet_size);
 			await call<[number, number], void>("start_write_config", length, this.packet_size);
 			for (let i = 0; i < length; i++)

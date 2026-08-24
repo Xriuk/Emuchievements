@@ -31,7 +31,10 @@ class Plugin:
 			config = json.loads(Plugin.buffer)
 			Plugin.buffer = ""
 			with open(os.path.join(decky_plugin.DECKY_PLUGIN_SETTINGS_DIR, "settings.json"), "w") as f:
-				json.dump(config, f, indent="\t")
+				try:
+					json.dump(config, f, indent="\t")
+				except Exception as e:
+					raise Exception(Plugin.buffer)
 
 	async def start_read_config(self, packet_size = 1000) -> int:
 		Plugin.buffer = ""
@@ -39,7 +42,7 @@ class Plugin:
 		Plugin.packet_size = packet_size
 		with open(os.path.join(decky_plugin.DECKY_PLUGIN_SETTINGS_DIR, "settings.json"), "r") as f:
 			config = json.load(f)
-			Plugin.buffer = json.dumps(config, indent="\t")
+			Plugin.buffer = json.dumps(config)
 			Plugin.length = math.ceil(len(Plugin.buffer) / float(Plugin.packet_size))
 			return Plugin.length
 
@@ -68,7 +71,7 @@ class Plugin:
 			clean_env = os.environ.copy()
 			clean_env["LD_LIBRARY_PATH"] = ""
 
-			hash_bin = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "backend", "hash")
+			hash_bin = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "bin", "hash")
 
 			cmd = [hash_bin, path]
 
@@ -88,7 +91,6 @@ class Plugin:
 			logger.error(f"Error hashing ROM {path}: {e}")
 			raise
 
-	
 	async def log_frontend(self, level: str, message: str) -> None:
 		if level == "error":
 			logger.error(f"[frontend] {message}")
@@ -115,7 +117,7 @@ class Plugin:
 		return ""
 
 	async def _log_tool_versions(self):
-		hash_bin = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "backend", "hash")
+		hash_bin = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "bin", "hash")
 		logger.info(f"Hash binary: {hash_bin} (exists: {os.path.exists(hash_bin)})")
 
 		flatpak = Plugin._find_flatpak(self)

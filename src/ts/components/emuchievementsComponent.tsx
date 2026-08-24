@@ -51,13 +51,15 @@ export const RefreshButton: VFC = () =>
 export const CacheButton: VFC = () =>
 {
 	const t = useTranslations();
-	const { managers: { achievementManager } } = useEmuchievementsState();
+	const { managers: achievementManagers } = useEmuchievementsState();
 
 	return (
 		<StyledButtonItem onClick={() => 
 		{
-			achievementManager.clearCache();
-			void achievementManager.saveCache();
+			achievementManagers.forEach(m => {
+				m.clearCache();
+				void m.saveCache();
+			});
 		}}
 		>
 			<FaTrash />
@@ -102,7 +104,7 @@ export const LoadingProgressBar: VFC = () =>
 
 export const GameList: VFC = () =>
 {
-	const { apps, managers: { achievementManager } } = useEmuchievementsState();
+	const { apps, managers: achievementManagers } = useEmuchievementsState();
 	const [appIds, setAppIds] = useState<number[]>();
 	useEffect(() =>
 	{
@@ -112,7 +114,8 @@ export const GameList: VFC = () =>
 	return <>{appIds?.map(appId =>
 	{
 		// Fetch all the achievements for each appId.
-		const achievements = achievementManager.fetchAchievementsProgress(appId);
+		const achievements = achievementManagers.find(m => m.isSupported(appId))
+			?.fetchAchievementsProgress(appId);
 		// If there are achievements, render them in a progress bar.
 		if (!!achievements)
 		{

@@ -3,13 +3,13 @@ import { useEffect, useState, VFC } from "react";
 // import {useTranslations} from "../useTranslations";
 // import Logger from "../logger";
 import { useEmuchievementsState } from "../hooks/achievementsContext";
-import { AchievementsProgress } from "../AchievementsManager";
+import type { AchievementsProgress } from "../managers/Manager";
 
 export const GameListComponent: VFC = () =>
 {
 	// const t = useTranslations()
 	// const logger = new Logger("GameListComponent");
-	const { apps, managers: { achievementManager } } = useEmuchievementsState();
+	const { apps, managers: achievementManagers } = useEmuchievementsState();
 	const [appIds, setAppIds] = useState<number[]>();
 	const [currentGame, setCurrentGame] = useState<AchievementsProgress>();
 	// @ts-ignore
@@ -46,7 +46,8 @@ export const GameListComponent: VFC = () =>
 			{appIds?.map(appId =>
 			{
 				// Fetch all the achievements for each appId.
-				const achievements = achievementManager.fetchAchievementsProgress(appId);
+				const achievements =  achievementManagers.find(m => m.isSupported(appId))
+					?.fetchAchievementsProgress(appId);
 				// If there are achievements, render them in a progress bar.
 				if (!!achievements)
 				{
@@ -83,7 +84,8 @@ export const GameListComponent: VFC = () =>
 									height: '100%',
 									display: 'block',
 									borderRadius: 'var(--round-radius-size)',
-								}} src={achievements.data.game.imageIcon} />
+									// DEV: support other images
+								}} src={(achievements as any).data?.game.imageIcon} />
 								<Field
 									// label={appStore.GetAppOverviewByAppID(appId).display_name}
 									bottomSeparator={"none"}
@@ -116,8 +118,9 @@ export const GameListComponent: VFC = () =>
 				display: 'flex',
 				flexDirection: 'row'
 			}}
+			// DEV: support other images
 		>
-			<Field label={"Current Game"} childrenContainerWidth={"max"}>{currentGame?.data.game.imageIcon}</Field>
+			<Field label={"Current Game"} childrenContainerWidth={"max"}>{(currentGame as any)?.data?.game.imageIcon}</Field>
 		</Focusable>
 
 	</Focusable>;

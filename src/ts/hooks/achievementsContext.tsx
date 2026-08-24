@@ -3,11 +3,12 @@ import { call, fetchNoCors } from "@decky/api";
 const flog = (level: "info" | "warn" | "error", message: string) =>
 	call<[string, string], void>("log_frontend", level, message).catch(() => {});
 import { createContext, FC, ReactNode, useContext, useEffect, useState } from "react";
-import { AchievementManager, Manager } from "../AchievementsManager";
+import { RetroAchievementsManager } from "../managers/RetroAchievementsManager";
 import { getAllNonSteamAppOverview } from "../steam-utils";
 import { Promise } from "bluebird";
 import { Settings } from "../settings";
 import { getTranslateFunc } from "../useTranslations";
+import type { Manager } from "../managers/Manager";
 
 interface Login
 {
@@ -34,15 +35,10 @@ export interface LoadingData
 	set fetching(value: boolean);
 }
 
-interface Managers
-{
-	achievementManager: AchievementManager;
-}
-
 interface EmuchievementsStateContext
 {
 	loadingData: LoadingData,
-	managers: Managers,
+	managers: Manager[],
 	apps: Promise<number[]>,
 	settings: Settings,
 	loggedIn: Promise<boolean>,
@@ -167,9 +163,9 @@ export class EmuchievementsState
 		this._settings = new Settings(this);
 	}
 
-	private readonly _managers: Managers = {
-		achievementManager: new AchievementManager(this)
-	};
+	private readonly _managers: Manager[] = [
+		new RetroAchievementsManager(this)
+	];
 
 	public eventBus = new EventTarget();
 
@@ -186,7 +182,7 @@ export class EmuchievementsState
 		};
 	}
 
-	get managers(): Managers
+	get managers(): Manager[]
 	{
 		return this._managers;
 	}
@@ -213,7 +209,7 @@ export class EmuchievementsState
 					return 0;
 				})
 				.map((overview) => overview.appid)
-				.filter((appId) => this._managers.achievementManager.isReady(appId))
+				.filter((appId) => this._managers.some(m => m.isReady(appId)))
 		)();
 	}
 
