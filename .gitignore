@@ -45,6 +45,8 @@ yalc.lock
 
 # Ignore output folder
 
+defaults
+
 backend/out
 backend/bin
 build
@@ -52,3 +54,5 @@ build
 deck.json
 **/cmake-build-debug/
 /out/
+
+main.py

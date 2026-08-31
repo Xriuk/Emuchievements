@@ -5,10 +5,10 @@ const flog = (level: "info" | "warn" | "error", message: string) =>
 import { createContext, FC, ReactNode, useContext, useEffect, useState } from "react";
 import { RetroAchievementsManager } from "../managers/RetroAchievementsManager";
 import { getAllNonSteamAppOverview } from "../steam-utils";
-import { Promise } from "bluebird";
 import { Settings } from "../settings";
 import { getTranslateFunc } from "../useTranslations";
 import type { Manager } from "../managers/Manager";
+import { RPCS3Manager } from "../managers/RPCS3Manager";
 
 interface Login
 {
@@ -33,6 +33,8 @@ export interface LoadingData
 	set total(value: number);
 	get fetching(): boolean;
 	set fetching(value: boolean);
+	get managerName(): string;
+	set managerName(value: string);
 }
 
 interface EmuchievementsStateContext
@@ -154,6 +156,19 @@ export class EmuchievementsState
 			this._fetching = value;
 			this.state.notifyUpdate();
 		}
+
+		private _managerName = "";
+
+		get managerName(): string
+		{
+			return this._managerName;
+		}
+
+		set managerName(value: string)
+		{
+			this._managerName = value;
+			this.state.notifyUpdate();
+		}
 	}(this);
 
 	private readonly _settings;
@@ -164,7 +179,8 @@ export class EmuchievementsState
 	}
 
 	private readonly _managers: Manager[] = [
-		new RetroAchievementsManager(this)
+		new RetroAchievementsManager(this),
+		new RPCS3Manager(this)
 	];
 
 	public eventBus = new EventTarget();
@@ -209,7 +225,7 @@ export class EmuchievementsState
 					return 0;
 				})
 				.map((overview) => overview.appid)
-				.filter((appId) => this._managers.some(m => m.isReady(appId)))
+				.filter((appId) => this.managers.some(m => m.isReady(appId)))
 		)();
 	}
 
@@ -229,6 +245,9 @@ export class EmuchievementsState
 				this._login = true;
 				return true;
 			}
+			else if(!username || !api_key)
+				return false;
+			
 			const url = `https://retroachievements.org/API/API_GetAchievementOfTheWeek.php?z=${username}&y=${api_key}`;
 			flog("info", `Login attempt for user: ${username}`);
 			try
@@ -249,37 +268,33 @@ export class EmuchievementsState
 
 	async init(): Promise<void>
 	{
-		Promise.map(Object.values(this._managers), (async (manager: Manager) =>
-		{
+		for(let manager of this._managers){
 			await manager.init();
-		})).then(() =>
-		{
-			this.notifyUpdate();
-		});
+		}
+		
+		this.notifyUpdate();
 	}
 
 	async deinit(): Promise<void>
 	{
-		Promise.map(Object.values(this._managers), (async (manager: Manager) =>
-		{
+		for(let manager of this._managers){
 			await manager.deinit();
-		})).then(() =>
-		{
-			this.notifyUpdate();
-		});
+		}
+		
+		this.notifyUpdate();
 		await call("reset");
-
 	}
 
 	async refresh(): Promise<void>
 	{
-		Promise.map(Object.values(this._managers), (async (manager: Manager) =>
-		{
-			await manager.refresh();
-		})).then(() =>
-		{
-			this.notifyUpdate();
-		});
+		for(let manager of this._managers){
+			if(manager.isEnabled())
+				await manager.refresh();
+			else
+				manager.clearCache();
+		}
+		
+		this.notifyUpdate();
 	}
 
 	async login({ username, api_key }: Login): Promise<boolean>

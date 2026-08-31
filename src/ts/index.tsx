@@ -22,12 +22,10 @@ import
 	SteamAppAchievement,
 	SteamAppOverview
 } from "./SteamTypes";
-import { waitForOnline } from "./steam-utils";
 import { EventBus, MountManager } from "./System";
 import { patchAppPage } from "./RoutePatches";
 import { runInAction } from "mobx";
 import { getTranslateFunc } from "./useTranslations";
-import { GameListComponent } from "./components/gameListComponent";
 import { StoreCategory } from "./managers/Manager";
 declare global
 {
@@ -113,12 +111,6 @@ export default definePlugin(function ()
 		</EmuchievementsStateContextProvider>
 	);
 
-	mountManager.addPageMount("/emuchievements/achievements", () =>
-		<EmuchievementsStateContextProvider emuchievementsState={state}>
-			<GameListComponent />
-		</EmuchievementsStateContextProvider>
-	);
-
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
@@ -130,7 +122,7 @@ export default definePlugin(function ()
 					//console.log(args, appStore.GetAppOverviewByAppID(args[0]), appDetailsStore.GetAppDetails(args[0]));
 					if (appStore.GetAppOverviewByAppID(args[0])?.app_type === 1073741824 && !Achievements.m_mapGlobalAchievements.has(args[0]))
 					{
-						let manager = state.managers.find(m => m.isSupported(args[0]));
+						let manager = state.managers.find(m => m.isEnabled() && m.isSupported(args[0]));
 						if(manager){
 							let data = manager.fetchAchievements(args[0]);
 							logger.debug(data.global);
@@ -180,7 +172,7 @@ export default definePlugin(function ()
 		if (appData && !appData.bLoadingAchievments && appData.details.achievements.nTotal === 0)
 		{
 			appData.bLoadingAchievments = true;
-			let manager = state.managers.find(m => m.isSupported(appid));
+			let manager = state.managers.find(m => m.isEnabled() && m.isSupported(appid));
 			if(manager){
 				const achievements = manager.fetchAchievements(appid);
 				if (achievements.user.data)
@@ -276,7 +268,7 @@ export default definePlugin(function ()
 				{
 					if (!update.bRunning)
 					{
-						let manager = state.managers.find(m => m.isSupported(update.unAppID));
+						let manager = state.managers.find(m => m.isEnabled() && m.isSupported(update.unAppID));
 						if(manager){
 							manager.clearRuntimeCacheForAppId(update.unAppID);
 							manager.fetchAchievements(update.unAppID);
@@ -296,7 +288,6 @@ export default definePlugin(function ()
 	mountManager.addMount({
 		mount: async function (): Promise<void>
 		{
-			await waitForOnline();
 			await state.init();
 		},
 		unMount: async function (): Promise<void>

@@ -51,7 +51,10 @@ export function retroAchievementToSteamAchievement(achievement: Achievement, gam
 		flCurrentProgress: ((achievement.dateEarned)) ? 1 : 0,
 		flMaxProgress: 1,
 		flMinProgress: 0,
-		rtUnlocked: achievement.dateEarnedHardcore ? ((new Date(achievement.dateEarnedHardcore).getTime() / 1000) + (new Date(achievement.dateEarnedHardcore).getTimezoneOffset() * 60)) : achievement.dateEarned ? ((new Date(achievement.dateEarned).getTime() / 1000) + (new Date(achievement.dateEarned).getTimezoneOffset() * 60)) : 0,
+		rtUnlocked:
+			achievement.dateEarnedHardcore ? ((new Date(achievement.dateEarnedHardcore).getTime() / 1000) + (new Date(achievement.dateEarnedHardcore).getTimezoneOffset() * 60)) :
+			achievement.dateEarned ? ((new Date(achievement.dateEarned).getTime() / 1000) + (new Date(achievement.dateEarned).getTimezoneOffset() * 60)) :
+			0,
 		strDescription: (achievement.description) ? achievement.description : "",
 		strID: (achievement.title) ?
 			achievement.title

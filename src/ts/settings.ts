@@ -7,15 +7,27 @@ import {getTranslateFunc} from "./useTranslations";
 
 export type SettingsData = {
 	retroachievements: RetroAchievementsData,
+	rpcs3?: RPCS3Data,
 	cache: CacheData,
 	general: GeneralData,
-	config_version: string
+	config_version: string,
+	rpcs3cache?: RPCS3CacheData
 };
 
 export type RetroAchievementsData = {
+	enabled?: boolean, // defaults to true
 	username: string,
 	api_key: string,
 	logged_in?: boolean,
+};
+
+export const RPCS3_USER_PATH_DEFAULT = "/home/deck/Emulation/storage/rpcs3/dev_hdd0/home/00000001";
+
+export type RPCS3Data = {
+	enabled?: boolean, // defaults to true
+	user_path?: string, // defaults to RPCS3_USER_PATH_DEFAULT
+	locale?: string, // defaults to "en"
+	show_cat_prefixes?: boolean, // defaults to true
 };
 
 export type CustomIdsOverrides = {
@@ -38,6 +50,26 @@ export type CacheData = {
 	ids: Record<number, number | null>,
 	custom_ids_overrides: Record<number, CustomIdsOverrides>,
 };
+
+export type RPCS3CustomIdsOverrides = {
+	/**
+	 * Game name
+	 */
+	name: string | null;
+	/**
+	 * Trophies ID (eg: NPWR00214_00)
+	 */
+	rpcs3_trophy_id: string | null;
+	/**
+	 * Game ID (eg: BCES00129, might be null for disc games)
+	 */
+	rpcs3_game_id?: string | null;
+}
+export type RPCS3CacheData = {
+	ids: Record<number, string | null>,
+	custom_ids_overrides: Record<string, RPCS3CustomIdsOverrides>,
+};
+
 
 export type GeneralData = {
 	game_page: boolean,
@@ -94,35 +126,57 @@ export class Settings
 	private readonly mutex: Mutex = new Mutex();
 	private readonly packet_size: number = 2048;
 	data: SettingsData = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-
-	get retroachievements(): RetroAchievementsData
-	{
-		return this.get("retroachievements");
-	}
-
-	set retroachievements(retroachievements: RetroAchievementsData)
-	{
-		this.set("retroachievements", retroachievements);
-	}
-
+	
 	get general(): GeneralData
 	{
 		return this.get("general");
 	}
-
 	set general(general: GeneralData)
 	{
 		this.set("general", general);
 	}
 
+
+	get retroachievements(): RetroAchievementsData
+	{
+		return this.get("retroachievements");
+	}
+	set retroachievements(retroachievements: RetroAchievementsData)
+	{
+		this.set("retroachievements", retroachievements);
+	}
+
+	get rpcs3(): RPCS3Data
+	{
+		return this.get("rpcs3") ?? {
+
+		};
+	}
+	set rpcs3(rpcs3: RPCS3Data)
+	{
+		this.set("rpcs3", rpcs3);
+	}
+
+
 	get cache(): CacheData
 	{
 		return this.get("cache");
 	}
-
 	set cache(cache: CacheData)
 	{
 		this.set("cache", cache);
+	}
+
+	get rpcs3Cache(): RPCS3CacheData
+	{
+		return this.get("rpcs3cache") ?? {
+			ids: {},
+			custom_ids_overrides: {}
+		};
+	}
+	set rpcs3Cache(cache: RPCS3CacheData)
+	{
+		this.set("rpcs3cache", cache);
 	}
 
 

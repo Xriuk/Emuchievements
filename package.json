@@ -1,7 +1,7 @@
 {
 	"name": "emuchievements",
-	"version": "2.0.7",
-	"description": "Plugin for viewing RetroAchievements progress. Part of the EmuDeck Project",
+	"version": "3.0.0",
+	"description": "Plugin for viewing RetroAchievements and RPCS3 progresses. Part of the EmuDeck Project.",
 	"scripts": {
 		"build": "shx rm -rf dist && rollup -c",
 		"dev": "shx rm -rf dist && RELEASE_TYPE=development rollup -c",
@@ -10,7 +10,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/EmuDeck/Emuchievements.git"
+		"url": "git+https://github.com/Xriuk/Emuchievements.git"
 	},
 	"keywords": [
 		"decky",
@@ -23,13 +23,14 @@
 	"author": "Witherking25 'Kernel Panic' <witherking@withertech.com>",
 	"contributors": [
 		"mrosenbergtech",
-		"AurorusFur"
+		"AurorusFur",
+		"Xriuk"
 	],
 	"license": "GPL-3",
 	"bugs": {
-		"url": "https://github.com/EmuDeck/Emuchievements/issues"
+		"url": "https://github.com/Xriuk/Emuchievements/issues"
 	},
-	"homepage": "https://github.com/EmuDeck/Emuchievements#readme",
+	"homepage": "https://github.com/Xriuk/Emuchievements#readme",
 	"devDependencies": {
 		"@decky/api": "1.1.3",
 		"@decky/ui": "4.11.1",

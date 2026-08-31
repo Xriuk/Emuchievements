@@ -24,7 +24,17 @@
 	"loading": "Loading",
 	"fetching": "Fetching",
 	"error": "Error",
-	"noAchievements": "No Achievements Found",
+	"noAchievements": "No achievements found",
 	"foundAchievements": "Loaded %%, Hash: %%",
-	"noLogin": "You are not logged in! Please login to view achievements."
+	"noLogin": "You are not logged in! Please login to view achievements.",
+	"noInternet": "You are not connected to the internet! Cannot retrieve achievements.",
+	"rpcs3NoUser": "No user profile has been detected!",
+	"rpcs3FoundTrophies": "Loaded %%, ID: %%",
+	"rpcs3NoTrophies": "No trophies found",
+	"rpcs3UserPath": "User folder path: ",
+	"rpcs3TrophiesCatPrefixes": "Show trophies categories prefixes",
+	"rpcs3TrophiesCatPrefixesDescription": "Show or hide emoji prefixes (Bronze), (Silver), (Gold) and (Platinum) from achievement name. For some games may need a full Steam Deck restart to actualize changes.",
+	"rpcs3Locale": "Trophies locale",
+	"settingsEnabled": "Enabled",
+	"settingsRPCS3": "RPCS3"
 }

@@ -25,6 +25,7 @@ import { ReactMarkdown, ReactMarkdownOptions } from "react-markdown/lib/react-ma
 import remarkGfm from "remark-gfm";
 import { useTranslations } from "../useTranslations";
 import { StyledButtonItem } from "./styleWrapper";
+import { RPCS3_USER_PATH_DEFAULT } from "../settings";
 
 interface MarkdownProps extends ReactMarkdownOptions
 {
@@ -97,7 +98,7 @@ const GeneralSettings: VFC = () =>
 				/>
 			</PanelSectionRow>
 
-			<PanelSectionRow>
+			{/* <PanelSectionRow>
 				<ToggleField
 					label={t("settingsShowAchievementsPrefixes")}
 					checked={settings.general.show_achieved_state_prefixes ?? true}
@@ -107,7 +108,7 @@ const GeneralSettings: VFC = () =>
 					}}
 					description={t('settingsShowAchievementsPrefixesDescription')}
 				/>
-			</PanelSectionRow>
+			</PanelSectionRow>*/}
 		</PanelSection>
 	</div>);
 };
@@ -135,62 +136,6 @@ const RetroAchievementsSettings: VFC = () =>
 		})
 	}, [settings.retroachievements.username, settings.retroachievements.api_key]);
 
-	return (<div style={{
-		marginTop: '40px',
-		height: 'calc( 100% - 40px )',
-	}}>
-		<PanelSection title={t("settingsRetroAchievements")}>
-			<PanelSectionRow>
-				<Field label={t("settingsInstructions")}>
-					<Markdown>
-						{t("settingsInstructionsMD")}
-					</Markdown>
-				</Field>
-			</PanelSectionRow>
-
-			<PanelSectionRow>
-				<TextField
-					label={t("settingsUsername")}
-					value={loginData.username}
-					disabled={loadingData.globalLoading}
-					onChange={(event) => onInputChange(event, 'username')}
-				/>
-			</PanelSectionRow>
-
-			<PanelSectionRow>
-				<TextField
-					label={t("settingsAPIKey")}
-					value={loginData.api_key}
-					bIsPassword={true}
-					disabled={loadingData.globalLoading}
-					onChange={(event) => onInputChange(event, 'api_key')}
-				/>
-			</PanelSectionRow>
-
-			<PanelSectionRow>
-				<StyledButtonItem disabled={loadingData.globalLoading} onClick={
-					async () =>
-					{
-						const { username, api_key } = loginData;
-
-						const result = await login({
-							username,
-							api_key,
-						});
-
-						toaster.toast({
-							title: t("title"),
-							body: result ? t("loginSuccess") : t("loginFailed")
-						});
-					}}>
-					Login
-				</StyledButtonItem>
-			</PanelSectionRow>
-		</PanelSection>
-	</div>);
-};
-
-const CustomIdsOverrides: VFC = () => {
 	type TableRowsProps = {
 		appId: string | undefined | null;
 		retroAchievementAppId: string | undefined;
@@ -291,62 +236,188 @@ const CustomIdsOverrides: VFC = () => {
 		}]);
 	}
 
+	return (<div style={{
+		marginTop: '40px',
+		height: 'calc( 100% - 40px )',
+	}}>
+		<PanelSection title={t("settingsRetroAchievements")}>
+			<PanelSectionRow>
+				<ToggleField
+					label={t("settingsEnabled")}
+					checked={(settings.retroachievements.enabled ?? true)}
+					onChange={async (checked) => {
+						settings.retroachievements.enabled = checked;
+						await settings.writeSettings();
+					}}/>
+			</PanelSectionRow>
+
+			<PanelSectionRow>
+				<Field label={t("settingsInstructions")}>
+					<Markdown>
+						{t("settingsInstructionsMD")}
+					</Markdown>
+				</Field>
+			</PanelSectionRow>
+
+			<PanelSectionRow>
+				<TextField
+					label={t("settingsUsername")}
+					value={loginData.username}
+					disabled={loadingData.globalLoading}
+					onChange={(event) => onInputChange(event, 'username')}
+				/>
+			</PanelSectionRow>
+
+			<PanelSectionRow>
+				<TextField
+					label={t("settingsAPIKey")}
+					value={loginData.api_key}
+					bIsPassword={true}
+					disabled={loadingData.globalLoading}
+					onChange={(event) => onInputChange(event, 'api_key')}
+				/>
+			</PanelSectionRow>
+
+			<PanelSectionRow>
+				<StyledButtonItem disabled={loadingData.globalLoading} onClick={
+					async () =>
+					{
+						const { username, api_key } = loginData;
+
+						const result = await login({
+							username,
+							api_key,
+						});
+
+						toaster.toast({
+							title: t("title"),
+							body: result ? t("loginSuccess") : t("loginFailed")
+						});
+					}}>
+					Login
+				</StyledButtonItem>
+			</PanelSectionRow>
+		</PanelSection>
+
+		<PanelSection title={t("settingsCustomIdsOverrides")}>
+			<ButtonItem layout="below" onClick={() => save()}>
+				{ t('settingsCustomIdsOverridesSave')}
+			</ButtonItem>
+
+			<div style={{overflow: 'scroll',height: '100%',}}>
+				<div
+					className="header-row"
+					style={{ gridTemplateColumns: '75% 25%', display: 'grid'}}
+				>
+					<div style={{padding: '10px 10px',textAlign: 'center',fontWeight: 600}}>
+						Game
+					</div>
+
+					<div style={{padding: '10px 10px',textAlign: 'center',fontWeight: 600}}>
+						RA Id
+					</div>
+				</div>
+			</div>
+
+			{tableRows.map((row, idx) => (
+				<Focusable
+					key={row.appId}
+					flow-children="horizontal"
+					style={{
+						gridTemplateColumns: '75% 25%',
+						padding: '10px 10px 10px 0px',textAlign: 'center',display: 'grid',
+					}}
+				>
+					<Dropdown
+						rgOptions={gameOptions}
+						selectedOption={row.appId}
+						onChange={(e) => onGameChange(idx, e.data)}
+					/>
+
+					<TextField
+						style={{ marginLeft: '1rem'}}
+						mustBeNumeric
+						defaultValue={row.retroAchievementAppId}
+						onChange={(e) =>
+							onChangeRetroAchievementsId(idx, e.target.value)
+						}
+					/>
+				</Focusable>
+			))}
+
+			<ButtonItem layout="below" onClick={() => addRow()}>
+				{ t('settingsCustomIdsOverridesAddRow')}
+			</ButtonItem>
+		</PanelSection>
+	</div>);
+};
+
+const RPCS3Settings: VFC = () => {
 	const t = useTranslations();
+	const { loadingData, settings } = useEmuchievementsState();
+
+	const [rpcs3Data , setRpcs3Data] = useState({
+		path: '',
+		locale: '',
+	});
+
+	useEffect(() => {
+		setRpcs3Data({
+			path: settings.rpcs3.user_path ?? RPCS3_USER_PATH_DEFAULT,
+			locale: settings.rpcs3.locale ?? 'en'
+		})
+	}, [settings.rpcs3.user_path, settings.rpcs3.locale]);
 
 	return (
 		<div style={{
 			marginTop: '40px',
 			height: 'calc(100% - 40px)',
 		}}>
-			<ButtonItem layout="below" onClick={() => save()}>
-				{ t('settingsCustomIdsOverridesSave')}
-			</ButtonItem>
+			<PanelSection title={t("settingsRPCS3")}>
+				<PanelSectionRow>
+					<ToggleField
+						label={t("settingsEnabled")}
+						checked={(settings.rpcs3.enabled ?? true)}
+						onChange={async (checked) => {
+							settings.rpcs3.enabled = checked;
+							await settings.writeSettings();
+						}}/>
 
-			<PanelSection>
-				<div style={{overflow: 'scroll',height: '100%',}}>
-					<div
-						className="header-row"
-						style={{ gridTemplateColumns: '75% 25%', display: 'grid'}}
-					>
-						<div style={{padding: '10px 10px',textAlign: 'center',fontWeight: 600}}>
-							Game
-						</div>
+					<TextField
+						label={t("rpcs3UserPath")}
+						value={rpcs3Data.path}
+						disabled={loadingData.globalLoading}
+						onChange={async (event) => {
+							setRpcs3Data(value => ({
+								...value,
+								path: event.target.value
+							}));
+							settings.rpcs3.user_path = event.target.value;
+							await settings.writeSettings();
+						}}/>
 
-						<div style={{padding: '10px 10px',textAlign: 'center',fontWeight: 600}}>
-							RA Id
-						</div>
-					</div>
-				</div>
+					<TextField
+						label={t("rpcs3Locale")}
+						value={rpcs3Data.locale}
+						disabled={loadingData.globalLoading}
+						onChange={async (event) => {
+							setRpcs3Data(value => ({
+								...value,
+								locale: event.target.value
+							}));
+							settings.rpcs3.locale = event.target.value;
+							await settings.writeSettings();
+						}}/>
 
-				{tableRows.map((row, idx) => (
-					<Focusable
-						key={row.appId}
-						flow-children="horizontal"
-						style={{
-							gridTemplateColumns: '75% 25%',
-							padding: '10px 10px 10px 0px',textAlign: 'center',display: 'grid',
-						}}
-					>
-						<Dropdown
-							rgOptions={gameOptions}
-							selectedOption={row.appId}
-							onChange={(e) => onGameChange(idx, e.data)}
-						/>
-
-						<TextField
-							style={{ marginLeft: '1rem'}}
-							mustBeNumeric
-							defaultValue={row.retroAchievementAppId}
-							onChange={(e) =>
-								onChangeRetroAchievementsId(idx, e.target.value)
-							}
-						/>
-					</Focusable>
-				))}
-
-				<ButtonItem layout="below" onClick={() => addRow()}>
-					{ t('settingsCustomIdsOverridesAddRow')}
-				</ButtonItem>
+					<ToggleField
+						label={t("rpcs3TrophiesCatPrefixes")}
+						description={t("rpcs3TrophiesCatPrefixesDescription")}
+						checked={(settings.rpcs3.show_cat_prefixes ?? true)}
+						onChange={async (checked) => {
+							settings.rpcs3.show_cat_prefixes = checked;
+							await settings.writeSettings();
+						}}/>
+				</PanelSectionRow>
 			</PanelSection>
 		</div>
 	);
@@ -365,8 +436,8 @@ export const SettingsComponent: VFC = () =>
 			content: <RetroAchievementsSettings />,
 		},
 		{
-			title: t("settingsCustomIdsOverrides"),
-			content: <CustomIdsOverrides />,
+			title: t("settingsRPCS3"),
+			content: <RPCS3Settings />,
 		}
 	]} />;
 };

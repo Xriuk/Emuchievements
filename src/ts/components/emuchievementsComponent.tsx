@@ -1,33 +1,39 @@
 import { CSSProperties, useEffect, useState, VFC } from "react";
 import
 {
+	ButtonItem,
 	Field,
 	Navigation,
 	PanelSection,
 	PanelSectionRow,
-	ProgressBarItem,
-	ProgressBarWithInfo
+	ProgressBar
 } from "@decky/ui";
 import { useEmuchievementsState } from "../hooks/achievementsContext";
 import { FaCog, FaSync, FaTrash } from "react-icons/fa";
 import { useTranslations } from "../useTranslations";
 import React from "react";
-import { StyledButtonItem } from "./styleWrapper";
+import { getAllNonSteamAppIds } from "../steam-utils";
+import { runInAction } from "mobx";
+import Logger from "../logger";
 
 export const SettingsButton: VFC = () =>
 {
 	const t = useTranslations();
 
 	return (
-		<StyledButtonItem onClick={() =>
-		{
-			Navigation.CloseSideMenus();
-			Navigation.Navigate("/emuchievements/settings");
-		}}
+		<ButtonItem
+			layout="below"
+			onClick={() =>
+			{
+				Navigation.CloseSideMenus();
+				Navigation.Navigate("/emuchievements/settings");
+			}}
 		>
-			<FaCog />
-			{t("settings")}
-		</StyledButtonItem>
+			<div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+				<FaCog />
+				<span style={{ marginLeft: "auto", textAlign: "right", width: "100%" }}>{t("settings")}</span>
+			</div>
+		</ButtonItem>
 	);
 };
 
@@ -37,16 +43,42 @@ export const RefreshButton: VFC = () =>
 	const { refresh } = useEmuchievementsState();
 
 	return (
-		<StyledButtonItem onClick={() => 
-		{
-			void refresh();
-		}}
+		<ButtonItem
+			layout="below"
+			onClick={() => 
+			{
+				void refresh();
+			}}
 		>
-			<FaSync />
-			{t("refresh")}
-		</StyledButtonItem>
+			<div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+				<FaSync />
+				<span style={{ marginLeft: "auto", textAlign: "right", width: "100%" }}>{t("refresh")}</span>
+			</div>
+		</ButtonItem>
 	);
 };
+
+async function clearNonSteamAchivements(){
+	let logger = new Logger("Clear");
+	let ids = await getAllNonSteamAppIds();
+	ids.forEach(appid => {
+		let appData = appDetailsStore.GetAppData(appid);
+		if(appData && !appData.bLoadingAchievments && appData.details?.achievements?.nTotal){
+			logger.log("Clearing achievements", appData);
+			runInAction(() =>
+			{
+				appData.details.achievements = {
+					nAchieved: 0,
+					nTotal: 0,
+					vecAchievedHidden: [],
+					vecHighlight: [],
+					vecUnachieved: []
+				};
+				appDetailsCache.SetCachedDataForApp(appid, "achievements", 2, appData.details.achievements);
+			});
+		}
+	});
+}
 
 export const CacheButton: VFC = () =>
 {
@@ -54,17 +86,22 @@ export const CacheButton: VFC = () =>
 	const { managers: achievementManagers } = useEmuchievementsState();
 
 	return (
-		<StyledButtonItem onClick={() => 
-		{
-			achievementManagers.forEach(m => {
-				m.clearCache();
-				void m.saveCache();
-			});
-		}}
+		<ButtonItem 
+			layout="below"
+			onClick={async () => 
+			{
+				await clearNonSteamAchivements();
+				achievementManagers.forEach(m => {
+					m.clearCache();
+					void m.saveCache();
+				});
+			}}
 		>
-			<FaTrash />
-			{t("clear")}
-		</StyledButtonItem>
+			<div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+				<FaTrash />
+				<span style={{ marginLeft: "auto", textAlign: "right", width: "100%" }}>{t("clear")}</span>
+			</div>
+		</ButtonItem>
 	);
 };
 
@@ -75,31 +112,32 @@ export const LoadingProgressBar: VFC = () =>
 	const [css, setCss] = useState<CSSProperties>();
 	useEffect(() =>
 	{
-		const def: CSSProperties = {
-			marginLeft: "20px"
-		};
+		const def: CSSProperties = { };
 		if (loadingData.errored) 
-		{
 			def.color = "red";
-		}
 		setCss(def);
 	}, [loadingData]);
-	return (
-		<ProgressBarWithInfo
+	return <>
+		<Field
 			label={t("loading")}
-			layout="inline"
+			description={loadingData.managerName + (!loadingData.fetching ? ` - ${loadingData.processed}/${loadingData.total}` : "")}
 			bottomSeparator="none"
-			sOperationText={loadingData.game}
+		/>
+		<ProgressBar
+			focusable={false}
+			nProgress={loadingData.percentage}
+			indeterminate={loadingData.fetching}
+		/>
+		<Field
+			label={loadingData.game}
 			description={
 				<div style={css} className="ProgressBarDescription_debug">
 					{(loadingData.errored) ? <>{t("error")}<br /></> : undefined}
 					{loadingData.description}
 				</div>}
-			nProgress={loadingData.percentage}
-			sTimeRemaining={!loadingData.fetching ? `${loadingData.processed}/${loadingData.total}` : ""}
-			indeterminate={loadingData.fetching}
+			bottomSeparator="none"
 		/>
-	);
+	</>;
 };
 
 export const GameList: VFC = () =>
@@ -114,25 +152,26 @@ export const GameList: VFC = () =>
 	return <>{appIds?.map(appId =>
 	{
 		// Fetch all the achievements for each appId.
-		const achievements = achievementManagers.find(m => m.isSupported(appId))
+		const achievements = achievementManagers.find(m => m.isEnabled() && m.isSupported(appId))
 			?.fetchAchievementsProgress(appId);
 		// If there are achievements, render them in a progress bar.
-		if (!!achievements)
+		if (achievements)
 		{
 			return (
 				<PanelSectionRow key={appId}>
 					<Field
 						label={appStore.GetAppOverviewByAppID(appId).display_name}
+						description={`${achievements.achieved}/${achievements.total}`}
+						childrenLayout="below"
 						onActivate={() =>
 						{
 							Navigation.Navigate(`/library/app/${appId}/achievements/my/individual`);
 							Navigation.CloseSideMenus();
 						}}>
-						<ProgressBarItem
+						<ProgressBar
+							focusable={false}
 							nProgress={achievements.percentage}
-							layout="inline"
-							description={`${achievements.achieved}/${achievements.total}`}
-							bottomSeparator="none" />
+						/>
 					</Field>
 				</PanelSectionRow>
 			);
