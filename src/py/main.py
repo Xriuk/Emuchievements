@@ -7,6 +7,7 @@ import decky_plugin
 import xmltodict
 import struct
 import base64
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
 
 logging.basicConfig(
@@ -27,7 +28,7 @@ TROPHYTRP_MAGIC = b"\xDC\xA2\x4D\x00"
 TROPUSR_HEADER_SIZE = 48
 TROPUSR_TABLE_HEADER_SIZE = 32
 TROPUSR_MAGIC = b"\x81\x8F\x54\xAD"
-TROPHY_STATE_ENTRY_HEADER_SIZE = 10
+TROPHY_STATE_ENTRY_HEADER_SIZE = 16
 TROPHY_STATE_TABLE_TYPE = 6
 TROPHY_STATE_ENTRY_CONTENTS_SIZE = 96
 TROPHY_STATE_ENTRY_SIZE = TROPHY_STATE_ENTRY_HEADER_SIZE + TROPHY_STATE_ENTRY_CONTENTS_SIZE
@@ -401,7 +402,7 @@ class Plugin:
 
 				entry_type, entry_contents_size = struct.unpack_from(">II", data, entry_offset)
 				if entry_type != TROPHY_STATE_TABLE_TYPE or entry_contents_size != TROPHY_STATE_ENTRY_CONTENTS_SIZE:
-					raise ValueError("invalid trophy-state entry header")
+					raise ValueError("invalid trophy-state entry header: " + str(entry_index) + " -> " + str(entry_offset))
 
 				trophy_id = struct.unpack_from(">I", data, entry_offset + 16)[0]
 				if trophy_id > 0x7FFFFFFF or trophy_id in parsed_states:
@@ -421,9 +422,9 @@ class Plugin:
 					dot_net_epoch = datetime(1, 1, 1, tzinfo=timezone.utc)
 					unlock_time_utc = dot_net_epoch + timedelta(microseconds=(timestamp2 * 10) // 10)
 
-				parsed_states[trophy_id] = {
+				parsed_states[str(trophy_id).zfill(3)] = {
 					'unlocked': (trophy_state != 0),
-					'unlock_time_utc': unlock_time_utc
+					'unlock_time_utc': unlock_time_utc.timestamp() if not unlock_time_utc is None else None
 				}
 
 		if not table6_seen:

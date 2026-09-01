@@ -19,7 +19,7 @@ const rpcs3RomPathRegex = '(\\/home\\/deck\\/.+\\/PS3_GAME)\\/USRDIR\\/EBOOT\\.B
 
 type RPCS3TrophyStatus = {
 	unlocked?: boolean;
-	unlock_time_utc?: string; // Timestamp
+	unlock_time_utc?: number; // UNIX timestamp
 };
 
 type RPCS3GameTrophies = {
@@ -336,7 +336,7 @@ export class RPCS3Manager extends BaseManager
 				flMaxProgress: 1,
 				flMinProgress: 0,
 				rtUnlocked: (achieved && trophies.progress?.[trophy.id]?.unlock_time_utc) ?
-					((new Date(trophies.progress[trophy.id].unlock_time_utc!).getTime() / 1000) + (new Date(trophies.progress[trophy.id].unlock_time_utc!).getTimezoneOffset() * 60)) :
+					trophies.progress[trophy.id].unlock_time_utc! :
 					0, // Unlocked date timestamp
 				strDescription: trophy.detail ?? '',
 				strID: trophy.id,
