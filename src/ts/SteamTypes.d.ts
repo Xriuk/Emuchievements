@@ -1,6 +1,5 @@
 import React, { ReactElement, ReactNode } from "react";
 import { AppDetails } from "@decky/ui";
-import { Hook } from "./SteamClient";
 
 type Hook = {
 	unregister: () => void;

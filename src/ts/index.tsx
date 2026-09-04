@@ -3,13 +3,13 @@ import
 	afterPatch,
 	beforePatch,
 	callOriginal,
-	findModuleChild,
+	findModuleExport,
 	Patch,
 	replacePatch,
 	Router,
 	staticClasses
 } from "@decky/ui";
-import { definePlugin, routerHook } from "@decky/api";
+import { definePlugin, routerHook, type DeckyRequestInit } from "@decky/api";
 import { FaClipboardCheck } from "react-icons/fa";
 import { SettingsComponent } from "./components/settingsComponent";
 import { EmuchievementsComponent } from "./components/emuchievementsComponent";
@@ -19,8 +19,8 @@ import
 {
 	AppDetailsStore, AppStore,
 	CollectionStore,
-	SteamAppAchievement,
-	SteamAppOverview
+	SteamAppOverview,
+	type AppData
 } from "./SteamTypes";
 import { EventBus, MountManager } from "./System";
 import { patchAppPage } from "./RoutePatches";
@@ -58,35 +58,22 @@ declare global
 	};
 
 	let collectionStore: CollectionStore;
+
+	// DEV: https://github.com/SteamDeckHomebrew/decky-loader/issues/960
+	let DeckyPluginLoader: {
+		legacyFetchNoCors(url: string, request?: DeckyRequestInit | any): Promise<{
+			success: boolean;
+			result: { status: number; headers: { [key: string]: string }; body: string } | any
+		}>
+	}
 }
 
-const AppDetailsSections = findModuleChild((m) =>
-{
-	if (typeof m !== 'object') return;
-	for (const prop in m)
-	{
-		try
-		{
-			if (
-				typeof m[prop] === 'function' &&
-				typeof m[prop].prototype?.GetSections === 'function'
-			) return m[prop];
-		} catch (_) {}
-	}
-	return;
-});
+const AppDetailsSections = findModuleExport((mProp) => (
+	typeof mProp === 'function' &&
+	typeof mProp.prototype?.GetSections === 'function'
+));
 
-const Achievements = (findModuleChild(module =>
-{
-	if (typeof module !== 'object') return undefined;
-	for (let prop in module)
-	{
-		try
-		{
-			if (module[prop]?.m_mapMyAchievements) return module[prop];
-		} catch (_) {}
-	}
-}));
+const Achievements = findModuleExport(mProp => mProp?.m_mapMyAchievements);
 
 interface Hook
 {
@@ -103,7 +90,7 @@ export default definePlugin(function ()
 	const eventBus = new EventBus();
 	const mountManager = new MountManager(eventBus, logger);
 
-	logger.debug(Achievements);
+	logger.debug(AppDetailsSections, Achievements);
 
 	mountManager.addPageMount("/emuchievements/settings", () =>
 		<EmuchievementsStateContextProvider emuchievementsState={state}>
@@ -111,6 +98,7 @@ export default definePlugin(function ()
 		</EmuchievementsStateContextProvider>
 	);
 
+	// DEV: What is this?
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
@@ -119,6 +107,7 @@ export default definePlugin(function ()
 				"LoadMyAchievements",
 				args =>
 				{
+					logger.debug("LoadMyAchievements");
 					//console.log(args, appStore.GetAppOverviewByAppID(args[0]), appDetailsStore.GetAppDetails(args[0]));
 					if (appStore.GetAppOverviewByAppID(args[0])?.app_type === 1073741824 && !Achievements.m_mapGlobalAchievements.has(args[0]))
 					{
@@ -140,6 +129,7 @@ export default definePlugin(function ()
 		}
 	});
 
+	// Adds games to Library filter where achievements are supported
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
@@ -149,6 +139,7 @@ export default definePlugin(function ()
 				"BHasStoreCategory",
 				function (args)
 				{
+					logger.debug("BHasStoreCategory", this, args);
 					// @ts-ignore
 					if ((this as SteamAppOverview).app_type == 1073741824)
 					{
@@ -166,10 +157,12 @@ export default definePlugin(function ()
 		}
 	});
 
-	function setAchievements(appid: number)
-	{
+	function setAchievements(appid: number){
 		let appData = appDetailsStore.GetAppData(appid);
-		if (appData && !appData.bLoadingAchievments && appData.details.achievements.nTotal === 0)
+		setAchievementsAppData(appid, appData);
+	}
+	function setAchievementsAppData(appid: number, appData: AppData | null){
+		if (appData && !appData.bLoadingAchievments && appData.details?.achievements.nTotal === 0)
 		{
 			appData.bLoadingAchievments = true;
 			let manager = state.managers.find(m => m.isEnabled() && m.isSupported(appid));
@@ -178,23 +171,18 @@ export default definePlugin(function ()
 				if (achievements.user.data)
 				{
 					const nAchieved = Object.keys(achievements.user.data.achieved).length;
-					const nTotal = Object.keys(achievements.user.data.achieved).length + Object.keys(achievements.user.data.unachieved).length;
-					const vecHighlight: SteamAppAchievement[] = [];
-					Object.entries(achievements.user.data.achieved).forEach(([, value]) =>
-					{
-						vecHighlight.push(value);
-					});
-					const vecUnachieved: SteamAppAchievement[] = [];
-					Object.entries(achievements.user.data.unachieved).forEach(([, value]) =>
-					{
-						vecUnachieved.push(value);
-					});
+					const nTotal = Object.keys(achievements.user.data.achieved).length +
+						Object.keys(achievements.user.data.unachieved).length +
+						Object.keys(achievements.user.data.hidden).length;
+					const vecHighlight = Object.values(achievements.user.data.achieved).filter(a => a.bHidden !== true);
+					const vecAchievedHidden = Object.values(achievements.user.data.achieved).filter(a => a.bHidden === true);
+					const vecUnachieved = Object.values(achievements.user.data.unachieved);
 					runInAction(() =>
 					{
 						appData.details.achievements = {
 							nAchieved,
 							nTotal,
-							vecAchievedHidden: [],
+							vecAchievedHidden,
 							vecHighlight,
 							vecUnachieved
 						};
@@ -207,20 +195,26 @@ export default definePlugin(function ()
 		}
 	}
 
+	// Set achievements on appDetailsStore (Used to show on game launch page and in the in-game overlay menu)
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
-			return beforePatch(
+			return afterPatch(
 				appDetailsStore,
-				"GetAchievements",
-				args =>
+				"GetAppData",
+				(args, appData) =>
 				{
-					setAchievements(args[0]);
+					logger.debug('GetAppData');
+
+					setAchievementsAppData(args[0], appData);
+
+					return appData;
 				}
 			);
 		}
 	});
 
+	// DEV: What is this?
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
@@ -229,6 +223,7 @@ export default definePlugin(function ()
 				"BIsStreamingRemotePlayTogetherGame",
 				_ =>
 				{
+					logger.debug('BIsStreamingRemotePlayTogetherGame');
 					if (state.managers.some(m => m.isReady((Router.MainRunningApp as SteamAppOverview | undefined)?.appid ?? 0)))
 					{
 						setAchievements((Router.MainRunningApp as SteamAppOverview | undefined)?.appid ?? 0);
@@ -238,6 +233,7 @@ export default definePlugin(function ()
 		}
 	});
 
+	// Achievements section on app details page
 	mountManager.addPatchMount({
 		patch(): Patch
 		{
@@ -254,6 +250,7 @@ export default definePlugin(function ()
 		}
 	});
 
+	// Refresh achievements on app close
 	mountManager.addMount({
 		mount: function (): void
 		{
@@ -283,6 +280,8 @@ export default definePlugin(function ()
 		}
 	});
 
+	// DEV: add refresh achievements on overlay open
+
 	mountManager.addMount(patchAppPage(state));
 
 	mountManager.addMount({
@@ -298,7 +297,6 @@ export default definePlugin(function ()
 
 	const unregister = mountManager.register();
 
-	//console.log(d);
 	return {
 		name: t("title"),
 		titleView: <div className={staticClasses.Title}>{t("title")}</div>,

@@ -488,26 +488,25 @@ export class RetroAchievementsManager extends BaseManager
 						numberOfAchievements =
 							Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length;
 						const nAchieved = Object.keys(ret.achieved).length;
-						const nTotal = Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length;
 						runInAction(() =>
 						{
 							appAchievementProgressCache.m_achievementProgress.mapCache.set(app_id, {
-								all_unlocked: nAchieved === nTotal,
+								all_unlocked: nAchieved === numberOfAchievements,
 								appid: app_id,
 								cache_time: new Date().getTime(),
-								percentage: (nAchieved / nTotal) * 100,
-								total: nTotal,
+								percentage: (nAchieved / numberOfAchievements) * 100,
+								total: numberOfAchievements,
 								unlocked: nAchieved,
 							});
 							appAchievementProgressCache.SaveCacheFile();
 							this.logger.debug(
 								`achievementsCache: `,
 								{
-									all_unlocked: nAchieved === nTotal,
+									all_unlocked: nAchieved === numberOfAchievements,
 									appid: app_id,
 									cache_time: new Date().getTime(),
-									percentage: (nAchieved / nTotal) * 100,
-									total: nTotal,
+									percentage: (nAchieved / numberOfAchievements) * 100,
+									total: numberOfAchievements,
 									unlocked: nAchieved,
 								},
 								appAchievementProgressCache.m_achievementProgress.mapCache.get(app_id)

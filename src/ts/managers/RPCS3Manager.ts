@@ -1,4 +1,4 @@
-import { call, toaster } from "@decky/api";
+import { call, fetchNoCors, toaster } from "@decky/api";
 import Logger from "../logger";
 import
 {
@@ -13,6 +13,7 @@ import { format } from "../useTranslations";
 import { RPCS3_USER_PATH_DEFAULT, type RPCS3CacheData, type RPCS3CustomIdsOverrides } from "../settings";
 import { BaseManager, loadingFetchedAchievements, type FetchedAchievements } from "./Manager";
 import { romRegex } from "./RetroAchievementsManager";
+import { getUserTrophiesEarnedForTitle, type AuthTokensResponse, type UserThinTrophy } from "psn-api";
 
 const rpcs3IdRegex = '\\/dev_hdd0\\/game\\/([A-Z0-9]+)\\/';
 const rpcs3RomPathRegex = '(\\/home\\/deck\\/.+\\/PS3_GAME)\\/USRDIR\\/EBOOT\\.BIN';
@@ -38,7 +39,8 @@ type RPCS3GameTrophies = {
 		locked_icon: string;
 	}[],
 	user?: string,
-	progress?: Record<string, RPCS3TrophyStatus>
+	progress?: Record<string, RPCS3TrophyStatus>,
+	rarity?: UserThinTrophy[]
 };
 
 /**
@@ -79,6 +81,9 @@ export class RPCS3Manager extends BaseManager
 	private loading: Record<number, boolean> = { 0: false };
 
 	private logger: Logger = new Logger("RPCS3Manager");
+
+	private _psnTokens?: AuthTokensResponse;
+	private _psnTokensExpiration?: Date;
 
 	private clearRuntimeCache()
 	{
@@ -243,6 +248,7 @@ export class RPCS3Manager extends BaseManager
 			if(!trophies.trophies.length)
 				return undefined;
 
+			// Retrieve trophies icons and create grayscale versions for locked
 			for(let trophy of trophies.trophies){
 				trophy.icon = await call<[string, string, string], string>("rpcs3_get_trophy_icon_user", user, trophy_id, trophy.id) ?? '';
 				
@@ -301,6 +307,67 @@ export class RPCS3Manager extends BaseManager
 				trophies.progress = JSON.parse(result ?? '[]') as Record<string, RPCS3TrophyStatus>;
 				this.logger.debug(`${app_id} progress: `, trophies.progress);
 			}
+			else
+				this.logger.debug(`${app_id} no progress yet`);
+
+			// Retrieve trophies rarity
+			if(this._psnTokens){
+				// Refresh the token if needed
+				if(this._psnTokensExpiration && new Date() >= this._psnTokensExpiration){
+					try{
+						this._psnTokens = await (await fetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth', {
+							method: 'POST',
+							headers: {
+								"Content-Type": "application/x-www-form-urlencoded",
+								Authorization: "Basic MDk1MTUxNTktNzIzNy00MzcwLTliNDAtMzgwNmU2N2MwODkxOnVjUGprYTV0bnRCMktxc1A="
+							},
+							body: new URLSearchParams({
+								refresh_token: this._psnTokens.refreshToken,
+								grant_type: "refresh_token",
+								token_format: "jwt",
+								scope: "psn:mobile.v2.core psn:clientapp"
+							}).toString()
+						})).json()
+					}
+					catch(e){
+						this.logger.debug(`${app_id} PSN token refresh error`, e);
+						toaster.toast({
+							title: "[RPCS3]: " + this.t("title"),
+							body: this.t("rpcs3ErrorNpSSo")
+						});
+						this._psnTokens = undefined;
+						this._psnTokensExpiration = undefined;
+					}
+				}
+
+				if(this._psnTokens){
+					// Try PSN accounts with most PS3 games/trophies in order (https://psnprofiles.com/leaderboard/ps3),
+					// since PSN API requires an account to see trophies rarity but the we have no official user here...
+					const psnAccounts = [
+						'69542030923328854',
+						'8477639012129454573',
+						'7390413838940571081'
+					];
+					for(let accountId of psnAccounts){
+						try{
+							// npServiceName=trophy: PS3 trophies
+							let rarity: Awaited<ReturnType<typeof getUserTrophiesEarnedForTitle>>  = await (await fetchNoCors(`https://m.np.playstation.com/api/trophy/v1/users/${accountId}/npCommunicationIds/${trophy_id}/trophyGroups/all/trophies?npServiceName=trophy`, {
+								headers: {
+									Authorization: `Bearer ${this._psnTokens.accessToken}`,
+									"Content-Type": "application/json",
+								},
+
+							})).json();
+							if(rarity.trophies.length){
+								trophies.rarity = rarity.trophies;
+								this.logger.debug(`${app_id} rarity: `, trophies.rarity);
+								break;
+							}
+						}
+						catch{ }
+					}
+				}
+			}
 
 			trophies.game ??= {};
 			trophies.game.trophy_id = trophy_id;
@@ -328,10 +395,13 @@ export class RPCS3Manager extends BaseManager
 			this.logger.debug('Trophy: ', trophy);
 			let achieved = trophies.progress?.[trophy.id]?.unlocked === true;
 
+			let trophyIdInt = parseInt(trophy.id, 10);
+			let rate: string | number | undefined = trophies.rarity?.find(t => t.trophyId === trophyIdInt)?.trophyEarnedRate;
+
 			const steam: SteamAppAchievement = {
 				bAchieved: achieved,
 				bHidden: trophy.hidden === true,
-				flAchieved: 0, // Percentage of players who achieved (0-100) // DEV: find how to add
+				flAchieved: rate ? parseFloat(rate) : 0, // Percentage of players who achieved (0-100)
 				flCurrentProgress: achieved ? 1 : 0, // Progress percentage of the player achievement (flMinProgress-flMaxProgress)
 				flMaxProgress: 1,
 				flMinProgress: 0,
@@ -518,28 +588,27 @@ export class RPCS3Manager extends BaseManager
 							await appAchievementProgressCache.RequestCacheUpdate();
 						}
 						numberOfAchievements =
-							Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length;
+							Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length + Object.keys(ret.hidden).length;
 						const nAchieved = Object.keys(ret.achieved).length;
-						const nTotal = Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length;
 						runInAction(() =>
 						{
 							appAchievementProgressCache.m_achievementProgress.mapCache.set(app_id, {
-								all_unlocked: nAchieved === nTotal,
+								all_unlocked: nAchieved === numberOfAchievements,
 								appid: app_id,
 								cache_time: new Date().getTime(),
-								percentage: (nAchieved / nTotal) * 100,
-								total: nTotal,
+								percentage: (nAchieved / numberOfAchievements) * 100,
+								total: numberOfAchievements,
 								unlocked: nAchieved,
 							});
 							appAchievementProgressCache.SaveCacheFile();
 							this.logger.debug(
 								`achievementsCache: `,
 								{
-									all_unlocked: nAchieved === nTotal,
+									all_unlocked: nAchieved === numberOfAchievements,
 									appid: app_id,
 									cache_time: new Date().getTime(),
-									percentage: (nAchieved / nTotal) * 100,
-									total: nTotal,
+									percentage: (nAchieved / numberOfAchievements) * 100,
+									total: numberOfAchievements,
 									unlocked: nAchieved,
 								},
 								appAchievementProgressCache.m_achievementProgress.mapCache.get(app_id)
@@ -574,6 +643,86 @@ export class RPCS3Manager extends BaseManager
 				?? RPCS3_USER_PATH_DEFAULT);
 			if (user && await call<[string], boolean>("rpcs3_check_user_path", user))
 			{
+				if(!this.state.settings.rpcs3.npsso){
+					toaster.toast({
+						title: "[RPCS3]: " + this.t("title"),
+						body: this.t("rpcs3NoNpSSo")
+					});
+				}
+				else{
+					try{
+						// DEV: https://github.com/SteamDeckHomebrew/decky-loader/issues/960
+						const accessCodeResponse = await DeckyPluginLoader.legacyFetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth/authorize?' + new URLSearchParams({
+								access_type: "offline",
+								client_id: "09515159-7237-4370-9b40-3806e67c0891",
+								redirect_uri: "com.scee.psxandroid.scecompcall://redirect",
+								response_type: "code",
+								scope: "psn:mobile.v2.core psn:clientapp"
+							}).toString(), {
+								method: 'GET',
+								headers: {
+									Cookie: `npsso=${this.state.settings.rpcs3.npsso}`
+								},
+								allow_redirects: false
+							});
+						if(!accessCodeResponse.success || !accessCodeResponse.result.headers["Location"]?.includes("?code=")){
+							throw new Error(`
+								There was a problem retrieving your PSN access code. Is your NPSSO code valid?
+								To get a new NPSSO code, visit https://ca.account.sony.com/api/v1/ssocookie.`);
+						}
+						const accessCode = new URLSearchParams(accessCodeResponse.result.headers["Location"]!.split("redirect/")[1]).get('code')!;
+						/*const accessCodeResponse = await fetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth/authorize?' + new URLSearchParams({
+								access_type: "offline",
+								client_id: "09515159-7237-4370-9b40-3806e67c0891",
+								redirect_uri: "com.scee.psxandroid.scecompcall://redirect",
+								response_type: "code",
+								scope: "psn:mobile.v2.core psn:clientapp"
+							}).toString(), {
+							headers: {
+								Cookie: `npsso=${this.state.settings.rpcs3.npsso}`
+							},
+							redirect: 'manual'
+						});
+						if(!accessCodeResponse.headers.get("location")?.includes("?code=")){
+							throw new Error(`
+								There was a problem retrieving your PSN access code. Is your NPSSO code valid?
+								To get a new NPSSO code, visit https://ca.account.sony.com/api/v1/ssocookie.`);
+						}
+						const accessCode = new URLSearchParams(accessCodeResponse.headers.get("location")!.split("redirect/")[1]).get('code')!;*/
+
+						const psnTokens = await (await fetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth/token', {
+							method: 'POST',
+							headers: {
+								"Content-Type": "application/x-www-form-urlencoded",
+								Authorization: "Basic MDk1MTUxNTktNzIzNy00MzcwLTliNDAtMzgwNmU2N2MwODkxOnVjUGprYTV0bnRCMktxc1A="
+							},
+							body: new URLSearchParams({
+								code: accessCode,
+								redirect_uri: "com.scee.psxandroid.scecompcall://redirect",
+								grant_type: "authorization_code",
+								token_format: "jwt"
+							}).toString()
+						})).json();
+						this._psnTokens = {
+							accessToken: psnTokens.access_token,
+							expiresIn: psnTokens.expires_in,
+							idToken: psnTokens.id_token,
+							refreshToken: psnTokens.refresh_token,
+							refreshTokenExpiresIn: psnTokens.refresh_token_expires_in,
+							scope: psnTokens.scope,
+							tokenType: psnTokens.token_type
+						};
+						this._psnTokensExpiration = new Date();
+						this._psnTokensExpiration.setSeconds(this._psnTokensExpiration.getSeconds() + this._psnTokens.expiresIn - 10);
+					}
+					catch{
+						toaster.toast({
+							title: "[RPCS3]: " + this.t("title"),
+							body: this.t("rpcs3InvalidNpSSo")
+						});
+					}
+				}
+
 				if (!this.globalLoading)
 				{
 					this.globalLoading = true;
@@ -624,7 +773,7 @@ export class RPCS3Manager extends BaseManager
 			{
 				toaster.toast({
 					title: "[RPCS3]: " + this.t("title"),
-					body: this.t("rpcs3NoUser"),
+					body: this.t("rpcs3NoUser")
 				});
 			}
 		} catch (e: any)

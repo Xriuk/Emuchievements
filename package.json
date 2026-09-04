@@ -62,7 +62,8 @@
 		"react-icons": "^4.4.0",
 		"react-markdown": "^8.0.6",
 		"remark-gfm": "^3.0.1",
-		"throttled-queue": "^2.1.4"
+		"throttled-queue": "^2.1.4",
+		"psn-api": "^2.18.1"
 	},
 	"pnpm": {
 		"peerDependencyRules": {

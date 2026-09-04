@@ -359,14 +359,18 @@ const RPCS3Settings: VFC = () => {
 	const [rpcs3Data , setRpcs3Data] = useState({
 		path: '',
 		locale: '',
+		npsso: ''
 	});
 
 	useEffect(() => {
 		setRpcs3Data({
 			path: settings.rpcs3.user_path ?? RPCS3_USER_PATH_DEFAULT,
-			locale: settings.rpcs3.locale ?? 'en'
+			locale: settings.rpcs3.locale ?? 'en',
+			npsso: settings.rpcs3.npsso ?? ''
 		})
-	}, [settings.rpcs3.user_path, settings.rpcs3.locale]);
+	}, [settings.rpcs3.user_path, settings.rpcs3.locale, settings.rpcs3.npsso]);
+
+	// DEV: add file picker for home folder (openFilePicker)
 
 	return (
 		<div style={{
@@ -382,7 +386,9 @@ const RPCS3Settings: VFC = () => {
 							settings.rpcs3.enabled = checked;
 							await settings.writeSettings();
 						}}/>
-
+				</PanelSectionRow>
+				
+				<PanelSectionRow>
 					<TextField
 						label={t("rpcs3UserPath")}
 						value={rpcs3Data.path}
@@ -395,7 +401,9 @@ const RPCS3Settings: VFC = () => {
 							settings.rpcs3.user_path = event.target.value;
 							await settings.writeSettings();
 						}}/>
+				</PanelSectionRow>
 
+				<PanelSectionRow>
 					<TextField
 						label={t("rpcs3Locale")}
 						value={rpcs3Data.locale}
@@ -408,13 +416,38 @@ const RPCS3Settings: VFC = () => {
 							settings.rpcs3.locale = event.target.value;
 							await settings.writeSettings();
 						}}/>
+				</PanelSectionRow>
 
+				<PanelSectionRow>
 					<ToggleField
 						label={t("rpcs3TrophiesCatPrefixes")}
 						description={t("rpcs3TrophiesCatPrefixesDescription")}
 						checked={(settings.rpcs3.show_cat_prefixes ?? true)}
 						onChange={async (checked) => {
 							settings.rpcs3.show_cat_prefixes = checked;
+							await settings.writeSettings();
+						}}/>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
+					<Field label={t("settingsInstructions")}>
+						<Markdown>
+							{t("rpcs3SettingsInstructionsMD")}
+						</Markdown>
+					</Field>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
+					<TextField
+						label={t("rpcs3PSNAPIToken")}
+						value={rpcs3Data.npsso}
+						disabled={loadingData.globalLoading}
+						onChange={async (event) => {
+							setRpcs3Data(value => ({
+								...value,
+								npsso: event.target.value
+							}));
+							settings.rpcs3.npsso = event.target.value;
 							await settings.writeSettings();
 						}}/>
 				</PanelSectionRow>

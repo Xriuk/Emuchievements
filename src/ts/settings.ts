@@ -28,6 +28,7 @@ export type RPCS3Data = {
 	user_path?: string, // defaults to RPCS3_USER_PATH_DEFAULT
 	locale?: string, // defaults to "en"
 	show_cat_prefixes?: boolean, // defaults to true
+	npsso?: string, // 64-chars token to access PSN API
 };
 
 export type CustomIdsOverrides = {

@@ -82,6 +82,8 @@ export async function getAppDetails(appId: number): Promise<SteamAppDetails | nu
 	});
 }
 
+(window as any).getAppDetails = getAppDetails; // DEV: debug
+
 export async function waitForAppDetails(appId: number, predicate: (details: SteamAppDetails | null) => boolean)
 {
 	let retries = 4;

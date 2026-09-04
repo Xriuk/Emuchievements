@@ -10,7 +10,7 @@
 	"settingsCustomIdsOverridesSave": "Save",
 	"settingsCustomIdsOverridesAddRow": "Add row",
 	"settingsInstructions": "Instructions",
-	"settingsInstructionsMD": "To get your api key, go to [https://retroachievements.org/controlpanel.php](https://retroachievements.org/controlpanel.php) and log in to your account. you should see your api key in one of the entries in that page. either type it out in the api key box below or go to desktop mode and start steam in big picture mode so that you have access to the clipboard and paste it in,",
+	"settingsInstructionsMD": "To get your api key, go to [https://retroachievements.org/controlpanel.php](https://retroachievements.org/controlpanel.php) and log in to your account. You should see your api key in one of the entries in that page. Either type it out in the api key box below or go to desktop mode and start steam in big picture mode so that you have access to the clipboard and paste it in.",
 	"settingsUsername": "Username: ",
 	"settingsAPIKey": "Api Key: ",
 	"loginSuccess": "Login Success",
@@ -36,5 +36,10 @@
 	"rpcs3TrophiesCatPrefixesDescription": "Show or hide emoji prefixes (Bronze), (Silver), (Gold) and (Platinum) from achievement name. For some games may need a full Steam Deck restart to actualize changes.",
 	"rpcs3Locale": "Trophies locale",
 	"settingsEnabled": "Enabled",
-	"settingsRPCS3": "RPCS3"
+	"settingsRPCS3": "RPCS3",
+	"rpcs3SettingsInstructionsMD": "To retrieve trophies rarity from PSN a personal API token is required. To get your PSN token, go to [https://www.playstation.com](https://www.playstation.com) and log in to your account. In the same browser (due to a persisted cookie), visit [https://ca.account.sony.com/api/v1/ssocookie](https://ca.account.sony.com/api/v1/ssocookie). You will see a JSON response that looks something like: `{ \"npsso\": \"<64 character token>\", ... }`, you can copy the token and paste it below.",
+	"rpcs3PSNAPIToken": "PSN API token: ",
+	"rpcs3NoNpSSo": "No PSN API token was set, trophies rarity won't be retrieved!",
+	"rpcs3InvalidNpSSo": "Invalid PSN API token, trophies rarity won't be retrieved!",
+	"rpcs3ErrorNpSSo": "Error with PSN API token, trophies rarity won't be retrieved!"
 }
