@@ -1,7 +1,6 @@
 import { sleep } from "@decky/ui";
 import { call, fetchNoCors, toaster } from "@decky/api";
 import { rawGameToGame, retroAchievementToSteamAchievement } from "../Mappers";
-import Logger from "../logger";
 import
 {
 	checkOnlineStatus,
@@ -11,20 +10,9 @@ import
 } from "../steam-utils";
 import { AllAchievements, GlobalAchievements } from "../SteamTypes";
 import { Promise } from "bluebird";
-import { runInAction } from "mobx";
-import { format } from "../useTranslations";
-import { CacheData, CustomIdsOverrides } from "../settings";
+import { CacheData } from "../settings";
 import { GameInfoAndUserProgress, GetGameInfoAndUserProgressResponse } from "@retroachievements/api";
-import { BaseManager, loadingFetchedAchievements, type FetchedAchievements } from "./Manager";
-
-// localforage.config({
-// 	name: "emuchievements",
-// 	storeName: "achievements"
-// });
-
-// const romRegex = "(\\/([a-zA-Z\\d-:_.\\s])+)+(?!\\.AppImage)(\\.zip|\\.7z|\\.iso|\\.bin|\\.chd|\\.cue|\\.img|\\.a26|\\.lnx|\\.ngp|\\.ngc|\\.3dsx|\\.3ds|\\.app|\\.axf|\\.cci|\\.cxi|\\.elf|\\.n64|\\.ndd|\\.u1|\\.v64|\\.z64|\\.nds|\\.dmg|\\.gbc|\\.gba|\\.gb|\\.ciso|\\.dol|\\.gcm|\\.gcz|\\.nkit\\.iso|\\.rvz|\\.wad|\\.wia|\\.wbfs|\\.nes|\\.fds|\\.unif|\\.unf|\\.json|\\.kp|\\.nca|\\.nro|\\.nso|\\.nsp|\\.xci|\\.rpx|\\.wud|\\.wux|\\.wua|\\.32x|\\.cdi|\\.gdi|\\.m3u|\\.gg|\\.gen|\\.md|\\.smd|\\.sms|\\.ecm\\|.mds|\\.pbp|\\.dump|\\.gz|\\.mdf|\\.mrg|\\.prx|\\.bs|\\.fig|\\.sfc|\\.smc|\\.swx|\\.pc2|\\.wsc|\\.ws)";
-export const romRegex =
-	'(\\/([^/"])+)+(?!\\.AppImage)(\\.zip|\\.7z|\\.iso|\\.bin|\\.chd|\\.cue|\\.img|\\.a26|\\.lnx|\\.ngp|\\.ngc|\\.elf|\\.n64|\\.ndd|\\.u1|\\.v64|\\.z64|\\.nds|\\.dmg|\\.gbc|\\.gba|\\.gb|\\.ciso|\\.cso|\\.rom|\\.nes|\\.fds|\\.unif|\\.unf|\\.32x|\\.cdi|\\.gdi|\\.m3u|\\.gg|\\.gen|\\.smd|\\.sms|\\.ecm|\\.mds|\\.pbp|\\.dump|\\.gz|\\.mdf|\\.mrg|\\.prx|\\.bs|\\.fig|\\.sfc|\\.smc|\\.swx|\\.pc2|\\.wsc|\\.ws|\\.md|\\.gcm|\\.gcz|\\.rvz|\\.wad|\\.wia|\\.wbfs)';
+import { BaseManager, loadingFetchedAchievements, romRegex } from "./Manager";
 
 export interface AchievementsData
 {
@@ -34,96 +22,22 @@ export interface AchievementsData
 	md5: string;
 }
 
-export interface FetchedRetroAchievements extends FetchedAchievements
-{
-	retro?: AchievementsData;
-}
-
 /**
  * Retrieves achievements from RetroAchievements.org
  */
-export class RetroAchievementsManager extends BaseManager
+export class RetroAchievementsManager extends BaseManager<CacheData, AchievementsData>
 {
-	private cache: CacheData = {
-		ids: {},
-		custom_ids_overrides: {},
-	};
-
 	private hashes: Record<string, number> = {};
 
-	private get ids()
-	{
-		return this.cache.ids;
+	protected getName(){
+		return "RetroAchievements";
 	}
 
-	private set ids(value: Record<number, number | null>)
-	{
-		this.cache.ids = value;
+	protected getCacheKey(){
+		return "cache" as const;
 	}
 
-	private get customIdsOverrides() {
-		return this.cache.custom_ids_overrides;
-	}
-
-	private set customIdsOverrides(value: Record<number, CustomIdsOverrides>) {
-		this.cache.custom_ids_overrides = value;
-	}
-
-	private achievements: Record<number, AchievementsData> = {};
-
-	private userAchievements: Record<number, AllAchievements> = { 0: { loading: false } };
-
-	private globalAchievements: Record<number, GlobalAchievements> = { 0: { loading: false } };
-
-	private loading: Record<number, boolean> = { 0: false };
-
-	private logger: Logger = new Logger("RetroAchievementsManager");
-
-	private clearRuntimeCache()
-	{
-		this.userAchievements = { 0: { loading: false } };
-		this.globalAchievements = { 0: { loading: false } };
-		this.loading = { 0: false };
-		this.achievements = {};
-	}
-
-	public clearRuntimeCacheForAppId(appId: number)
-	{
-		delete this.achievements[appId];
-		delete this.userAchievements[appId];
-		delete this.globalAchievements[appId];
-		delete this.loading[appId];
-	}
-
-	public clearCache()
-	{
-		this.clearRuntimeCache();
-
-		this.ids = {};
-		this.customIdsOverrides = {};
-	}
-
-	public clearCacheForAppId(appId: number)
-	{
-		this.clearRuntimeCacheForAppId(appId);
-
-		delete this.ids[appId];
-		delete this.customIdsOverrides[appId];
-	}
-
-	public async saveCache()
-	{
-		this.state.settings.cache = this.cache;
-	}
-
-	public async loadCache()
-	{
-		await this.state.settings.readSettings();
-		this.cache = this.state.settings.cache;
-		await this.saveCache();
-	}
-
-	private async getAchievementsForGame(app_id: number): Promise<AchievementsData | undefined>
+	protected async getStoreForGame(app_id: number): Promise<AchievementsData | undefined>
 	{
 		if (this.ids[app_id] === null && this.customIdsOverrides[app_id]?.retro_achivement_game_id === null) {
 			return undefined;
@@ -273,7 +187,7 @@ export class RetroAchievementsManager extends BaseManager
 						{
 							return undefined;
 						}
-						this.achievements[app_id] = result;
+						this.store[app_id] = result;
 						this.logger.debug(`${app_id} result:`, result);
 						return result;
 					} else
@@ -293,7 +207,7 @@ export class RetroAchievementsManager extends BaseManager
 		}
 	}
 
-	private processRetroAchievements(retro: AchievementsData): FetchedRetroAchievements
+	protected processStore(retro: AchievementsData)
 	{
 		if (Object.values(retro.game.achievements).length == 0)
 		{
@@ -330,200 +244,7 @@ export class RetroAchievementsManager extends BaseManager
 				return result;
 			}, { user: defaultAchievements, global: defaultGlobalAchievements });
 
-		return {
-			user,
-			global,
-			retro
-		};
-	}
-
-	public fetchAchievements(app_id: number): FetchedRetroAchievements
-	{
-		const loading = this.loading[app_id] ?? this.loading[0];
-		const user = this.userAchievements[app_id] ?? this.userAchievements[0];
-		const global = this.globalAchievements[app_id] ?? this.globalAchievements[0];
-		const retro = this.achievements[app_id];
-
-		if (loading)
-		{
-			return loadingFetchedAchievements;
-		}
-		if (!user?.data)
-		{
-			this.loading[app_id] = true;
-			this.throttle(async () =>
-			{
-				const result = this.achievements[app_id] ?
-					this.processRetroAchievements(this.achievements[app_id]) :
-					await this.getAchievementsForGame(app_id)
-						.then(retro => {
-							if (retro && retro.game.achievements)
-								return this.processRetroAchievements(retro);
-							else
-								return loadingFetchedAchievements as FetchedRetroAchievements;
-						});
-
-				if (result?.retro && result?.retro?.game_id)
-				{
-					this.achievements[app_id] = result?.retro;
-					this.ids[app_id] = result?.retro?.game_id;
-				}
-
-				this.userAchievements[app_id] = result.user;
-				this.globalAchievements[app_id] = result.global;
-				this.loading[app_id] = false;
-				try { appDetailsStore.GetAchievements(app_id); } catch (_) {}
-				this.state.notifyUpdate();
-			});
-
-			return loadingFetchedAchievements;
-		} else
-		{
-			return {
-				user,
-				global,
-				retro
-			};
-		}
-	}
-
-	private async fetchAchievementsAsync(app_id: number): Promise<FetchedRetroAchievements | undefined>
-	{
-		const loading = this.loading[app_id] ?? this.loading[0];
-		const user = this.userAchievements[app_id] ?? this.userAchievements[0];
-		const global = this.globalAchievements[app_id] ?? this.globalAchievements[0];
-		const retro = this.achievements[app_id];
-
-		if (loading)
-		{
-			return loadingFetchedAchievements;
-		}
-		if (!user?.data)
-		{
-			this.loading[app_id] = true;
-			return await this.throttle(async () =>
-			{
-				const result = this.achievements[app_id] ?
-					this.processRetroAchievements(this.achievements[app_id]) :
-					await this.getAchievementsForGame(app_id)
-						.then(retro => {
-							if (retro && retro.game.achievements)
-								return this.processRetroAchievements(retro);
-							else
-								return loadingFetchedAchievements as FetchedRetroAchievements;
-						});
-
-				if (result?.retro && result?.retro?.game_id)
-				{
-					this.achievements[app_id] = result?.retro;
-					this.ids[app_id] = result?.retro?.game_id;
-				}
-
-				this.userAchievements[app_id] = result.user;
-				this.globalAchievements[app_id] = result.global;
-				this.loading[app_id] = false;
-
-				return result;
-
-			});
-		} else
-		{
-			return {
-				user,
-				global,
-				retro,
-			};
-		}
-	}
-
-	private async refreshAchievementsForApp(app_id: number): Promise<void>
-	{
-		try
-		{
-			await this.throttle(async () =>
-			{
-				const overview = appStore.GetAppOverviewByAppID(app_id);
-
-				const details = await getAppDetails(app_id);
-				const data = await this.countAchievementsForApp(app_id);
-				this.game = overview.display_name;
-				if (details && data.numberOfAchievements !== 0)
-					this.description = format(this.t("foundAchievements"), data.numberOfAchievements, data.hash);
-				else
-					this.description = this.t("noAchievements");
-				this.processed++;
-				this.logger.debug(
-					`loading achievements: ${this.state.loadingData.percentage}% done`,
-					app_id,
-					details,
-					overview
-				);
-			});
-		} catch (e)
-		{
-			this.logger.error(e, `Error refreshing achievements for app ${app_id}`);
-			throw e;
-		}
-	}
-
-	private async countAchievementsForApp(app_id: number): Promise<{ numberOfAchievements: number; hash?: string; }>
-	{
-		try
-		{
-			let numberOfAchievements = 0;
-			let achievements = await this.fetchAchievementsAsync(app_id);
-			if (achievements)
-			{
-				this.logger.debug(app_id, this.userAchievements);
-
-				if (!!this.userAchievements[app_id])
-				{
-					const ret = this.userAchievements[app_id]?.data;
-					if (!!ret)
-					{
-						if (!appAchievementProgressCache.m_achievementProgress)
-						{
-							await appAchievementProgressCache.RequestCacheUpdate();
-						}
-						numberOfAchievements =
-							Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length;
-						const nAchieved = Object.keys(ret.achieved).length;
-						runInAction(() =>
-						{
-							appAchievementProgressCache.m_achievementProgress.mapCache.set(app_id, {
-								all_unlocked: nAchieved === numberOfAchievements,
-								appid: app_id,
-								cache_time: new Date().getTime(),
-								percentage: (nAchieved / numberOfAchievements) * 100,
-								total: numberOfAchievements,
-								unlocked: nAchieved,
-							});
-							appAchievementProgressCache.SaveCacheFile();
-							this.logger.debug(
-								`achievementsCache: `,
-								{
-									all_unlocked: nAchieved === numberOfAchievements,
-									appid: app_id,
-									cache_time: new Date().getTime(),
-									percentage: (nAchieved / numberOfAchievements) * 100,
-									total: numberOfAchievements,
-									unlocked: nAchieved,
-								},
-								appAchievementProgressCache.m_achievementProgress.mapCache.get(app_id)
-							);
-						});
-					}
-				}
-			}
-			return {
-				numberOfAchievements,
-				hash: achievements?.retro?.md5,
-			};
-		} catch (e)
-		{
-			this.logger.error(e, `Error counting achievements for app ${app_id}`);
-			throw e;
-		}
+		return { user, global };
 	}
 
 	public async refresh(): Promise<void>
@@ -533,7 +254,7 @@ export class RetroAchievementsManager extends BaseManager
 			this.errored = false
 			if (!await checkOnlineStatus()){
 				toaster.toast({
-					title: "[RetroAchievements]: " + this.t("title"),
+					title: `[${this.getName()}]: ${this.t("title")}`,
 					body: this.t("noInternet"),
 				});
 				return;
@@ -569,7 +290,7 @@ export class RetroAchievementsManager extends BaseManager
 						delete this.customIdsOverrides[gameIdToBeRemovedAsNumber]
 					}
 
-					this.managerName = "RetroAchievements";
+					this.managerName = this.getName();
 					this.logger.log(`Refreshing achievements for ${nonSteamAppIdsWithRetroAchievementId.length} apps`);
 					this.fetching = false;
 					this.total = nonSteamAppIdsWithRetroAchievementId.length;
@@ -590,7 +311,7 @@ export class RetroAchievementsManager extends BaseManager
 			} else
 			{
 				toaster.toast({
-					title: "[RetroAchievements]: " + this.t("title"),
+					title: `[${this.getName()}]: ${this.t("title")}`,
 					body: this.t("noLogin"),
 				});
 			}
@@ -604,7 +325,7 @@ export class RetroAchievementsManager extends BaseManager
 		}
 	}
 
-	public async init(): Promise<void>
+	public override async init(): Promise<void>
 	{
 		await this.loadCache();
 		const response = await fetchNoCors("https://retroachievements.org/dorequest.php?r=hashlibrary", {
@@ -623,18 +344,8 @@ export class RetroAchievementsManager extends BaseManager
 			await this.refresh();
 	}
 
-	public deinit(): Promise<void> {
-		return Promise.resolve();
-	}
-
 	public isSupported(steamAppId: number): boolean {
 		return (this.ids[steamAppId] != null || this.customIdsOverrides[steamAppId]?.retro_achivement_game_id != null);
-	}
-
-	public isReady(steamAppId: number): boolean
-	{
-		// this.logger.debug("isReady", steamAppId, this.achievements[steamAppId])
-		return !!this.userAchievements[steamAppId] && !this.userAchievements[steamAppId].loading;
 	}
 
 	override isEnabled(): boolean {

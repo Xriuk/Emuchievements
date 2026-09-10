@@ -2,11 +2,15 @@ import json
 import logging
 import math
 import os
+import sys
 import subprocess
 import decky_plugin
 import xmltodict
 import struct
 import base64
+import hashlib
+import io
+import shutil
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
 
@@ -32,6 +36,11 @@ TROPHY_STATE_ENTRY_HEADER_SIZE = 16
 TROPHY_STATE_TABLE_TYPE = 6
 TROPHY_STATE_ENTRY_CONTENTS_SIZE = 96
 TROPHY_STATE_ENTRY_SIZE = TROPHY_STATE_ENTRY_HEADER_SIZE + TROPHY_STATE_ENTRY_CONTENTS_SIZE
+
+
+GDFX_MAGIC = b"MICROSOFT*XBOX*MEDIA"
+SECTOR_SIZE = 2048
+BASE_SECTOR = 0x20
 
 class Plugin:
 	packet_size: int = 1000
@@ -124,6 +133,10 @@ class Plugin:
 		Plugin.buffer = ""
 		Plugin.packet_size = 1000
 
+	async def python_version(self) -> str:
+		return sys.version
+
+
 	async def rpcs3_check_user_path(self, user_path: str) -> bool:
 		return os.path.isdir(user_path)
 	
@@ -152,7 +165,7 @@ class Plugin:
 		return None
 
 	# REF: https://github.com/justin-delano/PlayniteAchievements/blob/24b1bcab770277a645ef93f52795823739e0ae0e/source/Providers/RPCS3/Rpcs3TrpArchiveReader.cs#L46
-	async def parse_trp_directory(self, trp_bytes: bytes) -> Dict[str, Tuple[int, int]]:
+	async def rpcs3_parse_trp_directory(self, trp_bytes: bytes) -> Dict[str, Tuple[int, int]]:
 		magic = trp_bytes[0:4]
 		if magic != TROPHYTRP_MAGIC:
 			raise ValueError(f"Invalid TRP magic header: {magic.hex()}")
@@ -221,9 +234,7 @@ class Plugin:
 			return children[0]
 
 	async def rpcs3_get_all_trophies_file(self, file_bytes: bytes):
-		result = {
-			'trophies': []
-		}
+		result = {'trophies': []}
 
 		trophyconf = xmltodict.parse(file_bytes)['trophyconf']
 		if 'title-name' in trophyconf:
@@ -263,7 +274,7 @@ class Plugin:
 		try:
 			with open(trp_path, 'rb') as file:
 				trp_bytes = file.read()
-				trp = await Plugin.parse_trp_directory(self, trp_bytes)
+				trp = await Plugin.rpcs3_parse_trp_directory(self, trp_bytes)
 		except:
 			return json.dumps(result)
 
@@ -278,7 +289,7 @@ class Plugin:
 			entry = trp['TROPCONF.SFM']
 			result = await Plugin.rpcs3_get_all_trophies_file(self, trp_bytes[entry[0]:entry[0] + entry[1]])
 
-		# Try retrieving a language or English
+		# Try retrieving in order: the requested language, English or default
 		if 'trophies' in result and len(result['trophies']) > 0:
 			lang_result = {'trophies': []}
 			if f'TROP_{ps3_locale}.SFM' in trp:
@@ -324,7 +335,7 @@ class Plugin:
 		try:
 			with open(trp_path, 'rb') as file:
 				trp_bytes = file.read()
-				trp = await Plugin.parse_trp_directory(self, trp_bytes)
+				trp = await Plugin.rpcs3_parse_trp_directory(self, trp_bytes)
 		except:
 			return ''
 		
@@ -431,6 +442,406 @@ class Plugin:
 			raise ValueError("trophy-state table is missing")
 
 		return json.dumps(parsed_states)
+
+
+	async def xenia_check_user_path(self, user_path: str) -> bool:
+		return os.path.isfile(user_path + "/Account")
+
+	async def xenia_get_defaultxex(self, iso_path: str) -> bytes:
+		with open(iso_path, "rb") as f:
+			# https://github.com/xenia-manager/xenia-manager/blob/7704851bec096371e18d1394ed98f166469193db/source/XeniaManager.Core/Models/Files/Iso/IsoSectorReader.cs#L29
+			header_offset = None
+			base_sector = None
+			root_sector = None
+			root_size = None
+			sectors = [
+				BASE_SECTOR,	# XDKI
+				0x30620, 		# XGD1
+				0x4120,			# XGD3
+				0x1FB40,		# XGD2
+			]
+			for sector in sectors:
+				try:
+					header_offset = sector * SECTOR_SIZE
+
+					# Read root directory sector and size from GDFX header
+					f.seek(header_offset)
+					magic, root_sector, root_size = struct.unpack("<20sII", f.read(28))
+					if magic == GDFX_MAGIC:
+						base_sector = sector - BASE_SECTOR
+						break
+
+					f.seek(header_offset + SECTOR_SIZE - 20)
+					tailMagic = struct.unpack("<20s", f.read(20))
+					if tailMagic == GDFX_MAGIC:
+						base_sector = sector - BASE_SECTOR
+						break
+
+					header_offset = None
+
+				except:
+					continue
+			if header_offset is None:
+				raise ValueError("Not a valid Xbox 360 GDFX ISO image.")
+
+			# Parse directory entries looking for default.xex
+			f.seek((base_sector + root_sector) * SECTOR_SIZE)
+			dir_data = f.read(root_size)
+			
+			pos = 0
+			while pos < len(dir_data):
+				# Read entry header
+				if pos + 14 > len(dir_data):
+					break
+
+				_, _, sector, size, _, name_len = struct.unpack("<HHIIBB", dir_data[pos:pos+14])
+				if name_len == 0:
+					break
+					
+				name = dir_data[pos+14 : pos+14+name_len].decode("ascii", errors="ignore")
+				
+				if name.lower() == "default.xex":
+					f.seek((base_sector + sector) * SECTOR_SIZE)
+					return f.read(size)
+				
+				# Entry size padded to 4-byte boundary
+				entry_size = (14 + name_len + 3) & ~3
+				pos += entry_size
+		
+		return None
+
+	# headers_predicate receives (xex_bytes, key, value) and if returns not None it will be the returned result
+	async def xenia_parse_xex(self, xex_bytes: bytes, headers_predicate):
+		if len(xex_bytes) < 24 or xex_bytes[:4] != b"XEX2":
+			raise ValueError("Not a valid XEX2 file.")
+
+		# Read optional header count (Big-Endian)
+		opt_header_count = struct.unpack(">I", xex_bytes[20:24])[0]
+		
+		pos = 24
+		for _ in range(opt_header_count):
+			if pos + 8 > len(xex_bytes):
+				break
+				
+			key, value = struct.unpack(">II", xex_bytes[pos:pos+8])
+			pos += 8
+
+			result = headers_predicate(xex_bytes, key, value)
+			if not result is None:
+				return result
+			
+		return None
+
+	async def xenia_get_titleid(self, iso_path: str) -> str:
+		def titleid_filter(xex_bytes, key, value):
+			# 0x00040006 = Execution ID, 06 x 4 = 24 bytes
+			if key == 0x00040006:
+				# Value stores the absolute offset to the execution info block
+				# Title ID is located 12 bytes into Execution Info (4 bytes long)
+				title_id_bytes = xex_bytes[value + 12 : value + 16]
+				return title_id_bytes.hex().upper()
+			else:
+				return None
+
+		xex_bytes = await Plugin.xenia_get_defaultxex(self, iso_path)
+		if xex_bytes is None:
+			return None
+		return await Plugin.xenia_parse_xex(self, iso_path, titleid_filter)
+
+	# entry_namespace:
+	# 1 Metadata (check id = 1480672072 / XACH)
+	# 2 Image
+	# 3 String Tables (localization)
+	async def xenia_get_spaxdbf(self, iso_path: str, title_id: str) -> bytes:
+		xex_bytes = await Plugin.xenia_get_defaultxex(self, iso_path)
+		if xex_bytes is None:
+			return None
+
+		# Save default.xex to a temporary file for xextool to read
+		temp_xex_path = os.path.join("/tmp", f"{title_id}.xex")
+		with open(temp_xex_path, "wb") as temp_xex_file:
+			temp_xex_file.write(xex_bytes)
+		
+		# Run xextool with Wine
+		temp_res_path = os.path.join("/tmp", f"{title_id}_spa")
+		shutil.rmtree(temp_res_path, ignore_errors=True)
+		cmd = [
+			os.path.join(decky_plugin.HOME, ".local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine"),
+			os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "py_modules", "bin", "XexTool.exe"),
+			"-d", temp_res_path,
+			temp_xex_path
+		]
+		result = subprocess.run(cmd)
+
+		# Remove default.xex
+		os.remove(temp_xex_path)
+
+		# Check if we have a file in the resource directory
+		temp_spa_path = os.path.join(temp_res_path, title_id)
+		if not os.path.isfile(temp_spa_path):
+			shutil.rmtree(temp_res_path, ignore_errors=True)
+			return None
+
+		# Read the SPA file and return its bytes
+		with open(temp_spa_path, "rb") as spa_file:
+			spa_bytes = spa_file.read()
+			shutil.rmtree(temp_res_path, ignore_errors=True)
+
+			return spa_bytes
+
+	# entry_predicate receives (xdbf_bytes, entry_namespace, entry_id, entry_offset, entry_size) and if returns not None it will be added to the returned result list
+	# entry_offset: offset by start_pos
+	async def xenia_parse_xdbf_all(self, xdbf_bytes: bytes, entry_predicate):
+		if len(xdbf_bytes) < 4 or xdbf_bytes[:4] != b"XDBF":
+			raise ValueError("Not a valid XDBF file.")
+		
+		entry_max, entry_current, free_max, free_current = struct.unpack(">IIII", xdbf_bytes[8:24])
+		entries_offset = 24
+
+		# https://free60.org/System-Software/Formats/XDBF/#entry-data-offset
+		start_pos = (entry_max * 18) + (free_max * 8) + 24
+
+		result_list = []
+
+		for _ in range(entry_max):
+			entry_namespace, entry_id, entry_offset, entry_size = struct.unpack(">HQII", xdbf_bytes[entries_offset:entries_offset+18])
+			entries_offset += 18
+
+			result = entry_predicate(xdbf_bytes, entry_namespace, entry_id, entry_offset + start_pos, entry_size)
+			if not result is None:
+				result_list.append(result)
+
+		return result_list	
+
+	async def xenia_parse_xdbf(self, xdbf_bytes: bytes, entry_predicate):
+		result = await Plugin.xenia_parse_xdbf_all(self, xdbf_bytes, entry_predicate)
+		if len(result) > 0:
+			return result[0]
+		else:
+			return None
+
+	# https://github.com/XboxChef/XeXtractor/blob/5fb6d8b17e5d38a6100590ce43962fb0df07770b/XDBF.cs#L126
+	async def xenia_locale_to_xbox360(self, locale: str) -> int:
+		match locale.lower():
+			case "en": return 1
+			case "ja": return 2
+			case "de": return 3
+			case "fr": return 4
+			case "es": return 5
+			case "it": return 6
+			case "ko": return 7
+			case "pt": return 9
+			case "zh": return 10 # 8 is zh-TW
+			case "pl": return 11
+			case "ru": return 12
+
+		return None
+
+	async def xenia_get_localization(self, xdbf_bytes: bytes, locale: str) -> Dict[int, str]:
+		def xstr_predicate(xdbf_bytes, ns, id, offset, size):
+			if ns == 3 and id == xbox360_locale:
+				return xdbf_bytes[offset:offset + size]
+			else:
+				return None
+
+		xbox360_locale = await Plugin.xenia_locale_to_xbox360(self, locale)
+		if xbox360_locale is None:
+			return None
+
+		localization = {}
+
+		xstr_bytes = await Plugin.xenia_parse_xdbf(self, xdbf_bytes, xstr_predicate)
+		if xstr_bytes is None or len(xstr_bytes) < 4 or xstr_bytes[:4] != b"XSTR":
+			return None
+
+		string_count = struct.unpack(">H", xstr_bytes[12:14])[0]
+		string_offset = 14
+		for _ in range(string_count):
+			id, length = struct.unpack(">HH", xstr_bytes[string_offset:string_offset+4])
+			localization[id] = xstr_bytes[string_offset+4:string_offset+4+length].decode("utf-8", errors="ignore")
+			string_offset += 4 + length
+
+		if len(localization) <= 0:
+			return None
+		else:
+			return localization
+
+	def xenia_parse_achievement_flags(self, flags: int):
+		# Flags:
+		# https://free60.org/System-Software/Formats/GPD/#flags
+		# 0000 0000 000: Unknown
+		# 0: Edited (1048576)
+		# 00: Unknown
+		# 0: Achievement earned (131072)
+		# 0: Achievement earned online (65536)
+		# 0000 0000 0000: Unknown
+		# 0: Show unachieved (opposite of secret)
+		# 000: Achievement type (1: Completion, 2: Leveling, 3: Unlock, 4: Event, 5: Tournament, 6: Checkpoint, 7: Other)
+		achievement_type = None
+		match (flags & 7):
+			case 1:
+				achievement_type = "Completion"
+			case 2:
+				achievement_type = "Leveling"
+			case 3:
+				achievement_type = "Unlock"
+			case 4:
+				achievement_type = "Event"
+			case 5:
+				achievement_type = "Tournament"
+			case 6:
+				achievement_type = "Checkpoint"
+			case 7:
+				achievement_type = "Other"
+
+		return {
+			'type': achievement_type,
+			'secret': (flags & 8) == 0,
+			'earned_online': (flags & 65536) != 0,
+			'earned': (flags & 131072) != 0,
+			'edited': (flags & 1048576) != 0
+		}
+
+	async def xenia_get_all_achievements_game(self, iso_path: str, title_id: str, locale: str) -> str:
+		def xach_predicate(xdbf_bytes, ns, id, offset, size):
+			if ns == 1 and id == 1480672072:
+				return xdbf_bytes[offset:offset + size]
+			else:
+				return None
+
+		def xstr_predicate(xdbf_bytes, ns, id, offset, size):
+			if ns == 3 and id == xbox360_locale:
+				return xdbf_bytes[offset:offset + size]
+			else:
+				return None
+
+		result = {'achievements': []}
+
+		xdbf_bytes = await Plugin.xenia_get_spaxdbf(self, iso_path, title_id)
+		if xdbf_bytes is None:
+			return json.dumps(result)
+
+		# Retrieve achievements
+		xach_bytes = await Plugin.xenia_parse_xdbf(self, xdbf_bytes, xach_predicate)
+		if xach_bytes is None or len(xach_bytes) < 4 or xach_bytes[:4] != b"XACH":
+			return json.dumps(result)
+
+		# Retrieve localization, default to english
+		localization_lang = await Plugin.xenia_get_localization(self, xdbf_bytes, locale)
+		localization_en = None
+		if locale.lower() != 'en':
+			localization_en = await Plugin.xenia_get_localization(self, xdbf_bytes, 'en')
+		
+		if localization_lang is None and localization_en is None:
+			return json.dumps(result)
+
+		# Populate achievements
+		achievement_count = struct.unpack(">H", xach_bytes[12:14])[0]
+		achievement_offset = 14
+		for _ in range(achievement_count):
+			id, name_id, description_achieved_id, description_unachieved_id, icon_id, gamerscore, _, flags = struct.unpack(">HHHHIHHI", xach_bytes[achievement_offset:achievement_offset+20])
+			achievement_offset += 36
+
+			result['achievements'].append({
+				'id': id,
+				'name': localization_lang[name_id] if localization_lang and name_id in localization_lang else localization_en[name_id] if localization_en and name_id in localization_en else '',
+				'description_achieved': localization_lang[description_achieved_id] if localization_lang and description_achieved_id in localization_lang else localization_en[description_achieved_id] if localization_en and description_achieved_id in localization_en else '',
+				'description_unachieved': localization_lang[description_unachieved_id] if localization_lang and description_unachieved_id in localization_lang else localization_en[description_unachieved_id] if localization_en and description_unachieved_id in localization_en else '',
+				'icon_id': icon_id,
+				'gamerscore': gamerscore,
+				'flags': Plugin.xenia_parse_achievement_flags(self, flags)
+			})
+
+		return json.dumps(result)
+
+	async def xenia_get_achievement_icon_game(self, iso_path: str, title_id: str, icon_id: int) -> str:
+		def icon_predicate(xdbf_bytes, ns, id, offset, size):
+			if ns == 2 and id == icon_id:
+				return xdbf_bytes[offset:offset + size]
+			else:
+				return None
+		
+		xdbf_bytes = await Plugin.xenia_get_spaxdbf(self, iso_path, title_id)
+		if xdbf_bytes is None:
+			return ''
+
+		icon_bytes = await Plugin.xenia_parse_xdbf(self, xdbf_bytes, icon_predicate)
+		if icon_bytes is None:
+			return ''
+		else:
+			encoded_string = base64.b64encode(icon_bytes).decode('utf-8')
+			return "data:image/png;base64," + encoded_string
+
+	# entry_namespace:
+	# 1 Achievement
+	# 2 Image
+	# 3 Setting
+	# 4 Title
+	# 5 String
+	# 6 Achievement Security (created by GFWL for offline unlocked achievements?)
+	#   Avatar Award (360 only, this is only stored with in the PEC)
+	async def xenia_get_game_gpdxbdf(self, user_path: str, title_id: str) -> bytes:
+		path = user_path + "/" + title_id + ".gpd"
+		if not os.path.isfile(path):
+			return None
+		else:
+			with open(path, "rb") as gpd_file:
+				return gpd_file.read()
+
+	# Also doubles as xenia_get_all_achievements_user(?)
+	async def xenia_get_all_achievements_status(self, user_path: str, title_id: str) -> str:
+		def achievements_predicate(xdbf_bytes, ns, id, offset, size):
+			# https://github.com/justin-delano/PlayniteAchievements/blob/f778a5a6d673b9cb766bc83c0074f9d8bd0c1761/source/Providers/Xenia/GPDResolver.cs#L124-L127
+			if ns == 1 and len(size >= 28):
+				id, icon_id, gamerscore, flags, unlock_time = struct.unpack(">IIIIQ", xdbf_bytes[offset+4:offset+4+24])
+				
+				start = offset + 4 + 24
+				end = start
+				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
+					end += 2
+				name = xdbf_bytes[start:end].decode('utf-8')
+
+				start = end + 2
+				end = start
+				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
+					end += 2
+				description_achieved = xdbf_bytes[start:end].decode('utf-8')
+
+				start = end + 2
+				end = start
+				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
+					end += 2
+				description_unachieved = xdbf_bytes[start:end].decode('utf-8')
+
+				return {
+					'id': id,
+					'name': name,
+					'description_achieved': description_achieved,
+					'description_unachieved': description_unachieved,
+					'icon_id': icon_id,
+					'gamerscore': gamerscore,
+					'flags': Plugin.xenia_parse_achievement_flags(self, flags),
+
+					'unlock_time': unlock_time
+				}
+			else:
+				return None
+		
+		parsed_states = {}
+		
+		xdbf_bytes = await Plugin.xenia_get_game_gpdxbdf(self, user_path, title_id)
+		if xdbf_bytes is None:
+			return json_dumps(parsed_states)
+
+		# Retrieve achievements data
+		achievements = await Plugin.xenia_parse_xdbf_all(self, xdbf_bytes, achievements_predicate)
+		if len(achievements) > 0:
+			for achievement in achievements:
+				if 'id' in achievement:
+					parsed_states[str(achievement['id'])] = achievement
+		
+		return json.dumps(parsed_states)
+
 
 	def _find_flatpak(self) -> str:
 		for candidate in ["/usr/bin/flatpak", "/usr/local/bin/flatpak", "/run/host/usr/bin/flatpak"]:

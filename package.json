@@ -1,7 +1,7 @@
 {
 	"name": "emuchievements",
-	"version": "3.0.0",
-	"description": "Plugin for viewing RetroAchievements and RPCS3 progresses. Part of the EmuDeck Project.",
+	"version": "3.2.0",
+	"description": "Plugin for viewing RetroAchievements and RPCS3 and Xenia progresses. Part of the EmuDeck Project.",
 	"scripts": {
 		"build": "shx rm -rf dist && rollup -c",
 		"dev": "shx rm -rf dist && RELEASE_TYPE=development rollup -c",

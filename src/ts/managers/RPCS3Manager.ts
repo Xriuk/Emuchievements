@@ -1,18 +1,14 @@
 import { call, fetchNoCors, toaster } from "@decky/api";
-import Logger from "../logger";
 import
 {
+	checkOnlineStatus,
 	getAllNonSteamAppIds,
 	getAppDetails,
-	waitForOnline,
 } from "../steam-utils";
 import { AllAchievements, GlobalAchievements, type SteamAppAchievement } from "../SteamTypes";
 import { Promise } from "bluebird";
-import { runInAction } from "mobx";
-import { format } from "../useTranslations";
-import { RPCS3_USER_PATH_DEFAULT, type RPCS3CacheData, type RPCS3CustomIdsOverrides } from "../settings";
-import { BaseManager, loadingFetchedAchievements, type FetchedAchievements } from "./Manager";
-import { romRegex } from "./RetroAchievementsManager";
+import { RPCS3_USER_PATH_DEFAULT, type RPCS3CacheData } from "../settings";
+import { BaseManager, romRegex } from "./Manager";
 import { getUserTrophiesEarnedForTitle, type AuthTokensResponse, type UserThinTrophy } from "psn-api";
 
 const rpcs3IdRegex = '\\/dev_hdd0\\/game\\/([A-Z0-9]+)\\/';
@@ -35,6 +31,7 @@ type RPCS3GameTrophies = {
 		type: 'P' | 'G' | 'S' | 'B';
 		name: string;
 		detail?: string;
+
 		icon: string;
 		locked_icon: string;
 	}[],
@@ -45,88 +42,22 @@ type RPCS3GameTrophies = {
 
 /**
  * Retrieves trophies from RPCS3 for installed games and folders, even not yet installed trophies
- * (for games which have not been run yet)
+ * (for games which have not been run yet), and optionally retrieves trophies rarity from PSN
  */
-export class RPCS3Manager extends BaseManager
+export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
 {
-	private cache: RPCS3CacheData = {
-		ids: {},
-		custom_ids_overrides: {},
-	};
-
-	private get ids()
-	{
-		return this.cache.ids;
-	}
-
-	private set ids(value: Record<number, string | null>)
-	{
-		this.cache.ids = value;
-	}
-
-	private get customIdsOverrides() {
-		return this.cache.custom_ids_overrides;
-	}
-
-	private set customIdsOverrides(value: Record<number, RPCS3CustomIdsOverrides>) {
-		this.cache.custom_ids_overrides = value;
-	}
-
-	private trophies: Record<number, RPCS3GameTrophies> = {};
-
-	private userAchievements: Record<number, AllAchievements> = { 0: { loading: false } };
-
-	private globalAchievements: Record<number, GlobalAchievements> = { 0: { loading: false } };
-
-	private loading: Record<number, boolean> = { 0: false };
-
-	private logger: Logger = new Logger("RPCS3Manager");
-
 	private _psnTokens?: AuthTokensResponse;
 	private _psnTokensExpiration?: Date;
 
-	private clearRuntimeCache()
-	{
-		this.userAchievements = { 0: { loading: false } };
-		this.globalAchievements = { 0: { loading: false } };
-		this.loading = { 0: false };
-		this.trophies = {};
+	protected getName(){
+		return "RPCS3";
 	}
 
-	public clearRuntimeCacheForAppId(appId: number)
-	{
-		delete this.trophies[appId];
-		delete this.userAchievements[appId];
-		delete this.globalAchievements[appId];
-		delete this.loading[appId];
+	protected getCacheKey(){
+		return "rpcs3Cache" as const;
 	}
 
-	public clearCache()
-	{
-		this.clearRuntimeCache();
-
-		this.ids = {};
-		this.customIdsOverrides = {};
-	}
-
-	public clearCacheForAppId(appId: number)
-	{
-		this.clearRuntimeCacheForAppId(appId);
-	}
-
-	public async saveCache()
-	{
-		this.state.settings.rpcs3Cache = this.cache;
-	}
-
-	public async loadCache()
-	{
-		await this.state.settings.readSettings();
-		this.cache = this.state.settings.rpcs3Cache;
-		await this.saveCache();
-	}
-
-	private async getAchievementsForGame(app_id: number): Promise<RPCS3GameTrophies | undefined>
+	protected async getStoreForGame(app_id: number): Promise<RPCS3GameTrophies | undefined>
 	{
 		if (this.ids[app_id] === null && this.customIdsOverrides[app_id]?.rpcs3_trophy_id === null)
 			return undefined;
@@ -138,7 +69,6 @@ export class RPCS3Manager extends BaseManager
 
 		this.logger.debug(`${app_id} user: `, user);
 
-		await waitForOnline();
 		const shortcut = await getAppDetails(app_id);
 		this.logger.debug(`${app_id} shortcut: `, shortcut);
 
@@ -224,12 +154,12 @@ export class RPCS3Manager extends BaseManager
 			// Try retrieving the trophies from the user directory first
 			let result = await call<[string, string], string>("rpcs3_get_all_trophies_user", user, trophy_id) ?? null;
 			let trophies = JSON.parse(result ?? '{}') as RPCS3GameTrophies;
-			
-			let locale = this.state.settings.rpcs3.locale ?? 'en';
 
 			// If we found nothing we search the game folder
 			let gameTrophies = false; // True if retrieved from game folder (0 achieved)
 			if(!trophies.trophies.length){
+				let locale = this.state.settings.rpcs3.locale ?? 'en';
+
 				if(romFolder)
 					result = await call<[string, string], string>("rpcs3_get_all_trophies_game", romFolder + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", locale.toLowerCase()) ?? null;
 				else if(gameId)
@@ -260,43 +190,8 @@ export class RPCS3Manager extends BaseManager
 				}
 				
 				// Create a locked grayscale version
-				if(trophy.icon){
-					trophy.locked_icon = await new Promise<string>((resolve) => {
-						let img = new Image();
-						img.crossOrigin = 'Anonymous';
-						img.onload = () => {
-							// 1. Create off-screen canvas and context
-							const canvas = document.createElement('canvas');
-							const ctx = canvas.getContext('2d')!;
-							
-							canvas.width = img.width;
-							canvas.height = img.height;
-
-							// 2. Draw image onto canvas
-							ctx.drawImage(img, 0, 0);
-
-							// 3. Extract pixel data (RGBA array)
-							const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-							const data = imageData.data;
-
-							// 4. Loop through pixels (step by 4: R, G, B, A)
-							for (let i = 0; i < data.length; i += 4) {
-								// Luminance formula for human perception weighting
-								const avg = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-								
-								data[i]     = avg; // Red
-								data[i + 1] = avg; // Green
-								data[i + 2] = avg; // Blue
-							}
-
-							// 5. Put grayscale pixel data back and return new base64 string
-							ctx.putImageData(imageData, 0, 0);
-							resolve(canvas.toDataURL('image/png'));
-						};
-
-						img.src = trophy.icon;
-					});
-				}
+				if(trophy.icon)
+					trophy.locked_icon = await this.grayScaleIcon(trophy.icon);
 				else
 					trophy.locked_icon = '';
 			}
@@ -304,14 +199,14 @@ export class RPCS3Manager extends BaseManager
 			// Retrieve progress for non-game trophies (actually played)
 			if(!gameTrophies){
 				result = await call<[string, string], string>("rpcs3_get_all_trophies_status", user, trophy_id) ?? null;
-				trophies.progress = JSON.parse(result ?? '[]') as Record<string, RPCS3TrophyStatus>;
+				trophies.progress = JSON.parse(result ?? '{}') as Record<string, RPCS3TrophyStatus>;
 				this.logger.debug(`${app_id} progress: `, trophies.progress);
 			}
 			else
 				this.logger.debug(`${app_id} no progress yet`);
 
 			// Retrieve trophies rarity
-			if(this._psnTokens){
+			if(this._psnTokens && await checkOnlineStatus()){
 				// Refresh the token if needed
 				if(this._psnTokensExpiration && new Date() >= this._psnTokensExpiration){
 					try{
@@ -332,7 +227,7 @@ export class RPCS3Manager extends BaseManager
 					catch(e){
 						this.logger.debug(`${app_id} PSN token refresh error`, e);
 						toaster.toast({
-							title: "[RPCS3]: " + this.t("title"),
+							title: `[${this.getName()}]: ${this.t("title")}`,
 							body: this.t("rpcs3ErrorNpSSo")
 						});
 						this._psnTokens = undefined;
@@ -373,14 +268,14 @@ export class RPCS3Manager extends BaseManager
 			trophies.game.trophy_id = trophy_id;
 			trophies.user = user;
 
-			this.trophies[app_id] = trophies;
+			this.store[app_id] = trophies;
 			return trophies;
 		}
 		
 		return undefined;
 	}
 
-	private processTrophies(trophies: RPCS3GameTrophies): FetchedAchievements{
+	protected processStore(store: RPCS3GameTrophies){
 		const defaultAchievements: AllAchievements = {
 			data: { achieved: {}, hidden: {}, unachieved: {} },
 			loading: false,
@@ -391,12 +286,12 @@ export class RPCS3Manager extends BaseManager
 			loading: false,
 		};
 
-		for(let trophy of trophies.trophies){
+		for(let trophy of store.trophies){
 			this.logger.debug('Trophy: ', trophy);
-			let achieved = trophies.progress?.[trophy.id]?.unlocked === true;
+			let achieved = store.progress?.[trophy.id]?.unlocked === true;
 
 			let trophyIdInt = parseInt(trophy.id, 10);
-			let rate: string | number | undefined = trophies.rarity?.find(t => t.trophyId === trophyIdInt)?.trophyEarnedRate;
+			let rate: string | number | undefined = store.rarity?.find(t => t.trophyId === trophyIdInt)?.trophyEarnedRate;
 
 			const steam: SteamAppAchievement = {
 				bAchieved: achieved,
@@ -405,8 +300,8 @@ export class RPCS3Manager extends BaseManager
 				flCurrentProgress: achieved ? 1 : 0, // Progress percentage of the player achievement (flMinProgress-flMaxProgress)
 				flMaxProgress: 1,
 				flMinProgress: 0,
-				rtUnlocked: (achieved && trophies.progress?.[trophy.id]?.unlock_time_utc) ?
-					trophies.progress[trophy.id].unlock_time_utc! :
+				rtUnlocked: (achieved && store.progress?.[trophy.id]?.unlock_time_utc) ?
+					store.progress[trophy.id].unlock_time_utc! :
 					0, // Unlocked date timestamp
 				strDescription: trophy.detail ?? '',
 				strID: trophy.id,
@@ -417,16 +312,16 @@ export class RPCS3Manager extends BaseManager
 			if(this.state.settings.rpcs3.show_cat_prefixes !== false){
 				switch(trophy.type){
 				case 'B':
-					steam.strName = "🟧 " + steam.strName;
+					steam.strDescription = "🟧 " + steam.strDescription;
 					break;
 				case 'S':
-					steam.strName = "⬜ " + steam.strName;
+					steam.strDescription = "⬜ " + steam.strDescription;
 					break;
 				case 'G':
-					steam.strName = "🟨 " + steam.strName;
+					steam.strDescription = "🟨 " + steam.strDescription;
 					break;
 				case 'P':
-					steam.strName = "💎 " + steam.strName;
+					steam.strDescription = "💎 " + steam.strDescription;
 					break;
 				}
 			}
@@ -439,7 +334,7 @@ export class RPCS3Manager extends BaseManager
 
 			if(steam.bAchieved)
 				defaultAchievements.data!.achieved[steam.strID] = steam;
-			else if(trophy.hidden)
+			else if(steam.bHidden)
 				defaultAchievements.data!.hidden[steam.strID] = steam;
 			else
 				defaultAchievements.data!.unachieved[steam.strID] = steam;
@@ -447,185 +342,10 @@ export class RPCS3Manager extends BaseManager
 			defaultGlobalAchievements.data![steam.strID] = steam.flAchieved;
 		}
 
-		return { user: defaultAchievements, global: defaultGlobalAchievements };
-	}
-
-	public fetchAchievements(app_id: number): FetchedAchievements
-	{
-		const loading = this.loading[app_id] ?? this.loading[0];
-		const user = this.userAchievements[app_id] ?? this.userAchievements[0];
-		const global = this.globalAchievements[app_id] ?? this.globalAchievements[0];
-
-		if (loading)
-		{
-			return loadingFetchedAchievements;
-		}
-		if (!user?.data)
-		{
-			this.loading[app_id] = true;
-			this.throttle(async () =>
-			{
-				const result = this.trophies[app_id] ?
-					this.processTrophies(this.trophies[app_id]) :
-					await this.getAchievementsForGame(app_id)
-						.then(trophies => {
-							if (trophies)
-								return this.processTrophies(trophies);
-							else
-								return loadingFetchedAchievements;
-						});
-
-				this.userAchievements[app_id] = result.user;
-				this.globalAchievements[app_id] = result.global;
-				this.loading[app_id] = false;
-				try { appDetailsStore.GetAchievements(app_id); } catch (_) {}
-				this.state.notifyUpdate();
-			});
-
-			return loadingFetchedAchievements;
-		} else
-		{
-			return {
-				user,
-				global
-			};
-		}
-	}
-
-	private async fetchAchievementsAsync(app_id: number): Promise<FetchedAchievements | undefined>
-	{
-		const loading = this.loading[app_id] ?? this.loading[0];
-		const user = this.userAchievements[app_id] ?? this.userAchievements[0];
-		const global = this.globalAchievements[app_id] ?? this.globalAchievements[0];
-
-		if (loading)
-		{
-			return loadingFetchedAchievements;
-		}
-		if (!user?.data)
-		{
-			this.loading[app_id] = true;
-			return await this.throttle(async () =>
-			{
-				const result = this.trophies[app_id] ?
-					this.processTrophies(this.trophies[app_id]) :
-					await this.getAchievementsForGame(app_id)
-						.then(trophies => {
-							if (trophies)
-								return this.processTrophies(trophies);
-							else
-								return loadingFetchedAchievements;
-						});
-
-				this.userAchievements[app_id] = result.user;
-				this.globalAchievements[app_id] = result.global;
-				this.loading[app_id] = false;
-
-				return result;
-
-			});
-		} else
-		{
-			return {
-				user,
-				global
-			};
-		}
-	}
-
-	private async refreshAchievementsForApp(app_id: number): Promise<void>
-	{
-		try
-		{
-			await this.throttle(async () =>
-			{
-				const overview = appStore.GetAppOverviewByAppID(app_id);
-
-				const details = await getAppDetails(app_id);
-				const data = await this.countAchievementsForApp(app_id);
-				if (details && data.numberOfAchievements !== 0)
-				{
-					this.game = overview.display_name;
-					this.description = format(this.t("rpcs3FoundTrophies"), data.numberOfAchievements, data.id);
-					this.processed++;
-				} else
-				{
-					this.game = overview.display_name;
-					this.description = this.t("rpcs3NoTrophies");
-					this.processed++;
-				}
-				this.logger.debug(
-					`loading trophies: ${this.state.loadingData.percentage}% done`,
-					app_id,
-					details,
-					overview
-				);
-			});
-		} catch (e)
-		{
-			this.logger.error(e, `Error refreshing trophies for app ${app_id}`);
-			throw e;
-		}
-	}
-
-	private async countAchievementsForApp(app_id: number): Promise<{ numberOfAchievements: number; id?: string; }>
-	{
-		try
-		{
-			let numberOfAchievements = 0;
-			let achievements = await this.fetchAchievementsAsync(app_id);
-			if (achievements)
-			{
-				this.logger.debug(app_id, this.userAchievements);
-
-				if (!!this.userAchievements[app_id])
-				{
-					const ret = this.userAchievements[app_id]?.data;
-					if (!!ret)
-					{
-						if (!appAchievementProgressCache.m_achievementProgress)
-						{
-							await appAchievementProgressCache.RequestCacheUpdate();
-						}
-						numberOfAchievements =
-							Object.keys(ret.achieved).length + Object.keys(ret.unachieved).length + Object.keys(ret.hidden).length;
-						const nAchieved = Object.keys(ret.achieved).length;
-						runInAction(() =>
-						{
-							appAchievementProgressCache.m_achievementProgress.mapCache.set(app_id, {
-								all_unlocked: nAchieved === numberOfAchievements,
-								appid: app_id,
-								cache_time: new Date().getTime(),
-								percentage: (nAchieved / numberOfAchievements) * 100,
-								total: numberOfAchievements,
-								unlocked: nAchieved,
-							});
-							appAchievementProgressCache.SaveCacheFile();
-							this.logger.debug(
-								`achievementsCache: `,
-								{
-									all_unlocked: nAchieved === numberOfAchievements,
-									appid: app_id,
-									cache_time: new Date().getTime(),
-									percentage: (nAchieved / numberOfAchievements) * 100,
-									total: numberOfAchievements,
-									unlocked: nAchieved,
-								},
-								appAchievementProgressCache.m_achievementProgress.mapCache.get(app_id)
-							);
-						});
-					}
-				}
-			}
-			return {
-				numberOfAchievements,
-				id: this.ids[app_id] ?? undefined,
-			};
-		} catch (e)
-		{
-			this.logger.error(e, `Error counting achievements for app ${app_id}`);
-			throw e;
-		}
+		return {
+			user: defaultAchievements,
+			global: defaultGlobalAchievements
+		};
 	}
 
 	private getHddPath(){
@@ -645,8 +365,14 @@ export class RPCS3Manager extends BaseManager
 			{
 				if(!this.state.settings.rpcs3.npsso){
 					toaster.toast({
-						title: "[RPCS3]: " + this.t("title"),
+						title: `[${this.getName()}]: ${this.t("title")}`,
 						body: this.t("rpcs3NoNpSSo")
+					});
+				}
+				else if(!await checkOnlineStatus()){
+					toaster.toast({
+						title: `[${this.getName()}]: ${this.t("title")}`,
+						body: this.t("rpcs3NoInternetNpSSo")
 					});
 				}
 				else{
@@ -717,7 +443,7 @@ export class RPCS3Manager extends BaseManager
 					}
 					catch{
 						toaster.toast({
-							title: "[RPCS3]: " + this.t("title"),
+							title: `[${this.getName()}]: ${this.t("title")}`,
 							body: this.t("rpcs3InvalidNpSSo")
 						});
 					}
@@ -751,7 +477,7 @@ export class RPCS3Manager extends BaseManager
 						delete this.customIdsOverrides[gameIdToBeRemovedAsNumber]
 					}
 
-					this.managerName = "RPCS3";
+					this.managerName = this.getName();
 					this.logger.log(`Refreshing trophies for ${nonSteamAppIdsWithRPCS3Id.length} apps`);
 					this.fetching = false;
 					this.total = nonSteamAppIdsWithRPCS3Id.length;
@@ -772,7 +498,7 @@ export class RPCS3Manager extends BaseManager
 			} else
 			{
 				toaster.toast({
-					title: "[RPCS3]: " + this.t("title"),
+					title: `[${this.getName()}]: ${this.t("title")}`,
 					body: this.t("rpcs3NoUser")
 				});
 			}
@@ -786,24 +512,8 @@ export class RPCS3Manager extends BaseManager
 		}
 	}
 
-	public async init(): Promise<void>
-	{
-		await this.loadCache();
-		if(this.isEnabled())
-			await this.refresh();
-	}
-
-	public deinit(): Promise<void> {
-		return Promise.resolve();
-	}
-
 	public isSupported(steamAppId: number): boolean {
 		return (this.ids[steamAppId] != null || this.customIdsOverrides[steamAppId]?.rpcs3_trophy_id != null);
-	}
-
-	public isReady(steamAppId: number): boolean
-	{
-		return !!this.userAchievements[steamAppId] && !this.userAchievements[steamAppId].loading
 	}
 
 	override isEnabled(): boolean {

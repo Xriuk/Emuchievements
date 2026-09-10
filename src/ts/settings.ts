@@ -6,12 +6,16 @@ import Logger from "./logger";
 import {getTranslateFunc} from "./useTranslations";
 
 export type SettingsData = {
+	config_version: string,
+	general: GeneralData,
+
 	retroachievements: RetroAchievementsData,
 	rpcs3?: RPCS3Data,
+	xenia?: XeniaData,
+
 	cache: CacheData,
-	general: GeneralData,
-	config_version: string,
-	rpcs3cache?: RPCS3CacheData
+	rpcs3cache?: RPCS3CacheData,
+	xeniacache?: XeniaCacheData
 };
 
 export type RetroAchievementsData = {
@@ -31,6 +35,15 @@ export type RPCS3Data = {
 	npsso?: string, // 64-chars token to access PSN API
 };
 
+export type XeniaData = {
+	enabled?: boolean, // defaults to true
+	user_path?: string, // like "/home/deck/Emulation/roms/xbox360/content/<A010000011AA1111>/FFFE07D1/00010000/<A010000011AA1111>"
+	locale?: string, // defaults to "en"
+	show_gamerscore?: boolean, // defaults to true
+	show_description_locked?: boolean, // undefined: show locked/unlocked, true: show locked, false: show unlocked
+};
+
+
 export type CustomIdsOverrides = {
 	/**
 	 * Game name
@@ -46,7 +59,6 @@ export type CustomIdsOverrides = {
 	 */
 	retro_achivement_game_id: number | null,
 }
-
 export type CacheData = {
 	ids: Record<number, number | null>,
 	custom_ids_overrides: Record<number, CustomIdsOverrides>,
@@ -68,7 +80,26 @@ export type RPCS3CustomIdsOverrides = {
 }
 export type RPCS3CacheData = {
 	ids: Record<number, string | null>,
-	custom_ids_overrides: Record<string, RPCS3CustomIdsOverrides>,
+	custom_ids_overrides: Record<number, RPCS3CustomIdsOverrides>,
+};
+
+export type XeniaCustomIdsOverrides = {
+	/**
+	 * Game name
+	 */
+	name: string | null;
+	/**
+	 * Title Id (eg: 545107D1)
+	 */
+	xenia_title_id: string | null;
+	/**
+	 * Full path of the rom (ISO, ...)
+	 */
+	xenia_rom_path: string | null;
+}
+export type XeniaCacheData = {
+	ids: Record<number, string | null>,
+	custom_ids_overrides: Record<number, XeniaCustomIdsOverrides>,
 };
 
 
@@ -127,6 +158,7 @@ export class Settings
 	private readonly mutex: Mutex = new Mutex();
 	private readonly packet_size: number = 2048;
 	data: SettingsData = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+	last_data = '';
 	
 	get general(): GeneralData
 	{
@@ -149,13 +181,20 @@ export class Settings
 
 	get rpcs3(): RPCS3Data
 	{
-		return this.get("rpcs3") ?? {
-
-		};
+		return this.getOrSet("rpcs3", {});
 	}
 	set rpcs3(rpcs3: RPCS3Data)
 	{
 		this.set("rpcs3", rpcs3);
+	}
+
+	get xenia(): XeniaData
+	{
+		return this.getOrSet("xenia", {});
+	}
+	set xenia(xenia: XeniaData)
+	{
+		this.set("xenia", xenia);
 	}
 
 
@@ -170,14 +209,26 @@ export class Settings
 
 	get rpcs3Cache(): RPCS3CacheData
 	{
-		return this.get("rpcs3cache") ?? {
+		return this.getOrSet("rpcs3cache", {
 			ids: {},
 			custom_ids_overrides: {}
-		};
+		});
 	}
 	set rpcs3Cache(cache: RPCS3CacheData)
 	{
 		this.set("rpcs3cache", cache);
+	}
+
+	get xeniaCache(): XeniaCacheData
+	{
+		return this.getOrSet("xeniacache", {
+			ids: {},
+			custom_ids_overrides: {}
+		});
+	}
+	set xeniaCache(cache: XeniaCacheData)
+	{
+		this.set("xeniacache", cache);
 	}
 
 
@@ -188,11 +239,8 @@ export class Settings
 
 	set<T extends keyof SettingsData>(key: T, value: SettingsData[T])
 	{
-		if (this.data.hasOwnProperty(key))
-		{
-			this.data[key] = value;
-			void this.writeSettings();
-		}
+		this.data[key] = value;
+		void this.writeSettings();
 		this.state.notifyUpdate();
 		return this;
 	}
@@ -209,6 +257,15 @@ export class Settings
 	get<T extends keyof SettingsData>(key: T): SettingsData[T]
 	{
 		return this.data[key];
+	}
+
+	private getOrSet<T extends keyof SettingsData>(key: T, def: NonNullable<SettingsData[T]>): NonNullable<SettingsData[T]>{
+		let data = this.get(key);
+		if(!data){
+			data = def;
+			this.set(key, data);
+		}
+		return data as any;
 	}
 
 	async readSettings(): Promise<void>
@@ -246,6 +303,8 @@ export class Settings
 			{
 				this.data = data;
 			}
+
+			this.last_data = JSON.stringify(this.data);
 		} finally
 		{
 			release();
@@ -258,7 +317,11 @@ export class Settings
 		const release = await this.mutex.acquire();
 		try
 		{
+			// Check if configuration changed from last, otherwise skip
 			const buffer = JSON.stringify(this.data);
+			if(buffer === this.last_data)
+				return;
+
 			const length = Math.ceil(buffer.length / this.packet_size);
 			await call<[number, number], void>("start_write_config", length, this.packet_size);
 			for (let i = 0; i < length; i++)
@@ -266,6 +329,8 @@ export class Settings
 				const data = buffer.slice(i * this.packet_size, (i + 1) * this.packet_size);
 				await call<[number, string], void>("write_config", i, data);
 			}
+
+			this.last_data = buffer;
 		} finally
 		{
 			release();

@@ -9,6 +9,7 @@ import { Settings } from "../settings";
 import { getTranslateFunc } from "../useTranslations";
 import type { Manager } from "../managers/Manager";
 import { RPCS3Manager } from "../managers/RPCS3Manager";
+import { XeniaManager } from "../managers/XeniaManager";
 
 interface Login
 {
@@ -180,7 +181,8 @@ export class EmuchievementsState
 
 	private readonly _managers: Manager[] = [
 		new RetroAchievementsManager(this),
-		new RPCS3Manager(this)
+		new RPCS3Manager(this),
+		new XeniaManager(this)
 	];
 
 	public eventBus = new EventTarget();

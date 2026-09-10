@@ -1,12 +1,12 @@
 import
-	{
-		ChangeEvent,
-		FC,
-		useEffect,
-		useRef,
-		useState,
-		VFC
-	} from "react";
+{
+	ChangeEvent,
+	FC,
+	useEffect,
+	useRef,
+	useState,
+	VFC
+} from "react";
 import
 {
 	Field,
@@ -18,9 +18,12 @@ import
 	Navigation,
 	Dropdown,
 	ButtonItem,
+	DialogBody,
+	DialogControlsSection,
+	Toggle,
 } from "@decky/ui";
 import { useEmuchievementsState } from "../hooks/achievementsContext";
-import { toaster } from "@decky/api";
+import { FileSelectionType, openFilePicker, toaster } from "@decky/api";
 import { ReactMarkdown, ReactMarkdownOptions } from "react-markdown/lib/react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslations } from "../useTranslations";
@@ -71,46 +74,28 @@ const GeneralSettings: VFC = () =>
 {
 	const t = useTranslations();
 	const { settings } = useEmuchievementsState();
-	return (<div style={{
-		marginTop: '40px',
-		height: 'calc( 100% - 40px )',
-	}}>
-		<PanelSection title={t("settingsGeneral")}>
-			<PanelSectionRow>
-				<ToggleField
-					label={t("settingsGamePage")}
-					checked={settings.general.game_page}
+	return <DialogBody>
+		<DialogControlsSection>
+			<Field label={t('settingsGamePage')}>
+				<Toggle
+					value={settings.general.game_page}
 					onChange={async (checked) => {
 						settings.general.game_page = checked;
 						await settings.writeSettings();
 					}}
 				/>
-			</PanelSectionRow>
-
-			<PanelSectionRow>
-				<ToggleField
-					label={t("settingsStoreCategory")}
-					checked={settings.general.store_category}
+			</Field>
+			<Field label={t('settingsStoreCategory')}>
+				<Toggle
+					value={settings.general.store_category}
 					onChange={async (checked) => {
 						settings.general.store_category = checked;
 						await settings.writeSettings();
 					}}
 				/>
-			</PanelSectionRow>
-
-			{/* <PanelSectionRow>
-				<ToggleField
-					label={t("settingsShowAchievementsPrefixes")}
-					checked={settings.general.show_achieved_state_prefixes ?? true}
-					onChange={async (checked) => {
-						settings.general.show_achieved_state_prefixes = checked;
-						await settings.writeSettings();
-					}}
-					description={t('settingsShowAchievementsPrefixesDescription')}
-				/>
-			</PanelSectionRow>*/}
-		</PanelSection>
-	</div>);
+			</Field>
+		</DialogControlsSection>
+	</DialogBody>;
 };
 
 const RetroAchievementsSettings: VFC = () =>
@@ -242,13 +227,15 @@ const RetroAchievementsSettings: VFC = () =>
 	}}>
 		<PanelSection title={t("settingsRetroAchievements")}>
 			<PanelSectionRow>
-				<ToggleField
-					label={t("settingsEnabled")}
-					checked={(settings.retroachievements.enabled ?? true)}
-					onChange={async (checked) => {
-						settings.retroachievements.enabled = checked;
-						await settings.writeSettings();
-					}}/>
+				<div className="DialogInputLabelGroup">
+					<ToggleField
+						label={t("settingsEnabled")}
+						checked={(settings.retroachievements.enabled ?? true)}
+						onChange={async (checked) => {
+							settings.retroachievements.enabled = checked;
+							await settings.writeSettings();
+						}}/>
+				</div>
 			</PanelSectionRow>
 
 			<PanelSectionRow>
@@ -294,7 +281,7 @@ const RetroAchievementsSettings: VFC = () =>
 							body: result ? t("loginSuccess") : t("loginFailed")
 						});
 					}}>
-					Login
+					{t("login")}
 				</StyledButtonItem>
 			</PanelSectionRow>
 		</PanelSection>
@@ -370,8 +357,6 @@ const RPCS3Settings: VFC = () => {
 		})
 	}, [settings.rpcs3.user_path, settings.rpcs3.locale, settings.rpcs3.npsso]);
 
-	// DEV: add file picker for home folder (openFilePicker)
-
 	return (
 		<div style={{
 			marginTop: '40px',
@@ -379,18 +364,21 @@ const RPCS3Settings: VFC = () => {
 		}}>
 			<PanelSection title={t("settingsRPCS3")}>
 				<PanelSectionRow>
-					<ToggleField
-						label={t("settingsEnabled")}
-						checked={(settings.rpcs3.enabled ?? true)}
-						onChange={async (checked) => {
-							settings.rpcs3.enabled = checked;
-							await settings.writeSettings();
-						}}/>
+					<div className="DialogInputLabelGroup">
+						<ToggleField
+							label={t("settingsEnabled")}
+							checked={(settings.rpcs3.enabled ?? true)}
+							onChange={async (checked) => {
+								settings.rpcs3.enabled = checked;
+								await settings.writeSettings();
+							}}/>
+					</div>
 				</PanelSectionRow>
 				
 				<PanelSectionRow>
 					<TextField
 						label={t("rpcs3UserPath")}
+						description={t("rpcs3UserPathDescription")}
 						value={rpcs3Data.path}
 						disabled={loadingData.globalLoading}
 						onChange={async (event) => {
@@ -404,8 +392,28 @@ const RPCS3Settings: VFC = () => {
 				</PanelSectionRow>
 
 				<PanelSectionRow>
+					<div className="DialogInputLabelGroup">
+						<StyledButtonItem disabled={loadingData.globalLoading} onClick={
+							async () =>
+							{
+								let result = await openFilePicker(FileSelectionType.FOLDER, rpcs3Data.path && rpcs3Data.path != RPCS3_USER_PATH_DEFAULT ? rpcs3Data.path : '/home', true, true, undefined, undefined, true, true);
+								let path = result.path ?? '';
+								setRpcs3Data(value => ({
+									...value,
+									path: path
+								}));
+								settings.rpcs3.user_path = path;
+								await settings.writeSettings();
+							}}>
+							{t("browse")}
+						</StyledButtonItem>
+					</div>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
 					<TextField
 						label={t("rpcs3Locale")}
+						description={t("rpcs3LocaleDescription")}
 						value={rpcs3Data.locale}
 						disabled={loadingData.globalLoading}
 						onChange={async (event) => {
@@ -419,14 +427,16 @@ const RPCS3Settings: VFC = () => {
 				</PanelSectionRow>
 
 				<PanelSectionRow>
-					<ToggleField
-						label={t("rpcs3TrophiesCatPrefixes")}
-						description={t("rpcs3TrophiesCatPrefixesDescription")}
-						checked={(settings.rpcs3.show_cat_prefixes ?? true)}
-						onChange={async (checked) => {
-							settings.rpcs3.show_cat_prefixes = checked;
-							await settings.writeSettings();
-						}}/>
+					<div className="DialogInputLabelGroup">
+						<ToggleField
+							label={t("rpcs3TrophiesCatPrefixes")}
+							description={t("rpcs3TrophiesCatPrefixesDescription")}
+							checked={(settings.rpcs3.show_cat_prefixes ?? true)}
+							onChange={async (checked) => {
+								settings.rpcs3.show_cat_prefixes = checked;
+								await settings.writeSettings();
+							}}/>
+					</div>
 				</PanelSectionRow>
 
 				<PanelSectionRow>
@@ -454,7 +464,127 @@ const RPCS3Settings: VFC = () => {
 			</PanelSection>
 		</div>
 	);
-}
+};
+
+const XeniaSettings: VFC = () => {
+	const t = useTranslations();
+	const { loadingData, settings } = useEmuchievementsState();
+
+	const [xeniaData , setXeniaData] = useState({
+		path: '',
+		locale: ''
+	});
+
+	useEffect(() => {
+		setXeniaData({
+			path: settings.xenia.user_path ?? '',
+			locale: settings.xenia.locale ?? 'en'
+		})
+	}, [settings.xenia.user_path, settings.xenia.locale]);
+
+	return (
+		<div style={{
+			marginTop: '40px',
+			height: 'calc(100% - 40px)',
+		}}>
+			<PanelSection title={t("settingsXenia")}>
+				<PanelSectionRow>
+					<div className="DialogInputLabelGroup">
+						<ToggleField
+							label={t("settingsEnabled")}
+							checked={(settings.xenia.enabled ?? true)}
+							onChange={async (checked) => {
+								settings.xenia.enabled = checked;
+								await settings.writeSettings();
+							}}/>
+					</div>
+				</PanelSectionRow>
+				
+				<PanelSectionRow>
+					<TextField
+						label={t("rpcs3UserPath")}
+						description={t("xeniaUserPathDescription")}
+						value={xeniaData.path}
+						disabled={loadingData.globalLoading}
+						onChange={async (event) => {
+							setXeniaData(value => ({
+								...value,
+								path: event.target.value
+							}));
+							settings.xenia.user_path = event.target.value;
+							await settings.writeSettings();
+						}}/>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
+					<div className="DialogInputLabelGroup">
+						<StyledButtonItem disabled={loadingData.globalLoading} onClick={
+							async () =>
+							{
+								let result = await openFilePicker(FileSelectionType.FOLDER, xeniaData.path || '/home', true, true, undefined, undefined, true, true);
+								let path = result.path ?? '';
+								setXeniaData(value => ({
+									...value,
+									path: path
+								}));
+								settings.xenia.user_path = path;
+								await settings.writeSettings();
+							}}>
+							{t("browse")}
+						</StyledButtonItem>
+					</div>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
+					<TextField
+						label={t("xeniaLocale")}
+						description={t("xeniaLocaleDescription")}
+						value={xeniaData.locale}
+						disabled={loadingData.globalLoading}
+						onChange={async (event) => {
+							setXeniaData(value => ({
+								...value,
+								locale: event.target.value
+							}));
+							settings.xenia.locale = event.target.value;
+							await settings.writeSettings();
+						}}/>
+				</PanelSectionRow>
+
+				<PanelSectionRow>
+					<div className="DialogInputLabelGroup">
+						<ToggleField
+							label={t("xeniaShowGamerscore")}
+							description={t("xeniaShowGamerscoreDescription")}
+							checked={(settings.xenia.show_gamerscore ?? true)}
+							onChange={async (checked) => {
+								settings.xenia.show_gamerscore = checked;
+								await settings.writeSettings();
+							}}/>
+					</div>
+				</PanelSectionRow>
+
+				<Field
+					label={t('xeniaDescription')}
+					description={t('xeniaDescriptionDescription')}
+					childrenContainerWidth={'fixed'}>
+					<Dropdown
+						rgOptions={[
+							{ data: undefined, label: t("xeniaDescriptionBoth") },
+							{ data: true, label: t("xeniaDescriptionLocked") },
+							{ data: false, label: t("xeniaDescriptionUnlocked") },
+						]}
+						selectedOption={settings.xenia.show_description_locked}
+						onChange={async (newVal) => {
+							settings.xenia.show_description_locked = newVal.data;
+							await settings.writeSettings();
+						}}
+					/>
+				</Field>
+			</PanelSection>
+		</div>
+	);
+};
 
 export const SettingsComponent: VFC = () =>
 {
@@ -471,6 +601,10 @@ export const SettingsComponent: VFC = () =>
 		{
 			title: t("settingsRPCS3"),
 			content: <RPCS3Settings />,
+		},
+		{
+			title: t("settingsXenia"),
+			content: <XeniaSettings />,
 		}
 	]} />;
 };

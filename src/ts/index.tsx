@@ -9,7 +9,7 @@ import
 	Router,
 	staticClasses
 } from "@decky/ui";
-import { definePlugin, routerHook, type DeckyRequestInit } from "@decky/api";
+import { call, definePlugin, routerHook, type DeckyRequestInit } from "@decky/api";
 import { FaClipboardCheck } from "react-icons/fa";
 import { SettingsComponent } from "./components/settingsComponent";
 import { EmuchievementsComponent } from "./components/emuchievementsComponent";
@@ -287,6 +287,8 @@ export default definePlugin(function ()
 	mountManager.addMount({
 		mount: async function (): Promise<void>
 		{
+			logger.debug("Python version: " + await call<[], string>("python_version"));
+			
 			await state.init();
 		},
 		unMount: async function (): Promise<void>
