@@ -27,14 +27,19 @@ type XeniaAchievement = {
 };
 
 type XeniaGameAchievements = {
-	achievements: XeniaAchievement[],
-	progress?: Record<number, XeniaAchievement>
+	achievements: XeniaAchievement[];
+};
+
+type XeniaGameAchievementsStats = XeniaGameAchievements & {
+	progress?: Record<number, XeniaAchievement>;
 };
 
 /**
  * Retrieves achievements from Xenia
  */
-export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchievements>{
+export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchievementsStats>{
+	private _achievements: Record<number, XeniaGameAchievements | null> = {};
+	
 	protected getName(){
 		return "Xenia";
 	}
@@ -43,7 +48,13 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 		return "xeniaCache" as const;
 	}
 
-	protected async getStoreForGame(app_id: number): Promise<XeniaGameAchievements | undefined>
+	override clearCache(): void {
+		super.clearCache();
+
+		this._achievements = {};
+	}
+
+	protected async getStoreForGame(app_id: number): Promise<XeniaGameAchievementsStats | undefined>
 	{
 		if (this.ids[app_id] === null && this.customIdsOverrides[app_id]?.xenia_title_id === null)
 			return undefined;
@@ -89,10 +100,9 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 				if (this.customIdsOverrides[app_id] && this.customIdsOverrides[app_id]?.xenia_title_id) {
 					this.ids[app_id] = this.customIdsOverrides[app_id].xenia_title_id;
 				} else {
-					// DEV: retrieve game id from recent games for faster access, like in https://github.com/justin-delano/PlayniteAchievements/blob/24b1bcab770277a645ef93f52795823739e0ae0e/source/Providers/Xenia/XeniaScanner.cs#L212
-
-					// Retrieve the game id from default.xex
-					titleId = await call<[string], string>("xenia_get_titleid", rom) ?? null;
+					// Retrieve the game id from default.xex inside the rom
+					// Retrieving it from recent games would not have been efficient as it would have required opening multiple files
+					titleId = await call<[string], string>("xenia_get_titleid_game", rom) ?? null;
 
 					this.logger.debug(`${app_id} game id: `, titleId);
 
@@ -125,50 +135,77 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 		let title_id: string | undefined | null = this.ids[app_id];
 		if (typeof title_id === "string" && title_id !== "")
 		{
-			let achievements: XeniaGameAchievements = { achievements: [] };
+			// Retrieve from cache first, since achievements data do not change
+			let achievements: XeniaGameAchievementsStats;
+			let userAchievements = true;
+			let progressRetrieved = false;
+			if(this._achievements[app_id] === null)
+				return undefined;
+			else if(this._achievements[app_id])
+				achievements = { ...this._achievements[app_id] };
+			else{
+				achievements = { } as any;
 
-			// Retrieve progress, and maybe achievements
-			let result = await call<[string, string], string>("xenia_get_all_achievements_status", user, title_id) ?? null;
-			achievements.progress = JSON.parse(result ?? '{}') as Record<number, XeniaAchievement>;
+				// Retrieve progress, and maybe achievements
+				let result = await call<[string, string], string>("xenia_get_all_achievements_status", user, title_id) ?? null;
+				achievements.progress = JSON.parse(result ?? '{}') as Record<number, XeniaAchievement>;
+				progressRetrieved = true;
 
-			let locale = this.state.settings.xenia.locale ?? 'en';
+				// If we also have achievements (at least names) we populate them
+				achievements.achievements = Object.values(achievements.progress)
+				if(!achievements.achievements.every(a => a.name))
+					achievements.achievements = [];
 
-			// DEV: try retrieving achievements info from user profile GPD first
-			// https://github.com/justin-delano/PlayniteAchievements/blob/24b1bcab770277a645ef93f52795823739e0ae0e/source/Providers/Xenia/XeniaScanner.cs#L99	
+				// If we found nothing we search the game ROM
+				if(!achievements.achievements.length && rom){
+					let locale = this.state.settings.xenia.locale ?? 'en';	
 
-			// If we found nothing we search the game ROM
-			if(!achievements.achievements.length && rom){
-				// Retrieve achievements info from the game rom
-				result = await call<[string, string, string], string>("xenia_get_all_achievements_game", rom, title_id, locale.toLowerCase()) ?? null;
-				if(result)
-					achievements = JSON.parse(result ?? '{}') as XeniaGameAchievements;
+					// Retrieve achievements info from the game rom
+					result = await call<[string, string, string], string>("xenia_get_all_achievements_game", rom, title_id, locale.toLowerCase()) ?? null;
+					if(result){
+						achievements.achievements = (JSON.parse(result ?? '{}') as XeniaGameAchievements).achievements;
+						userAchievements = false;
+					}
+				}
+
+				// Retrieve trophies icons and create grayscale versions for locked
+				for(let achievement of achievements.achievements){
+					// Retrieve icon from user profile GPD first
+					if(userAchievements)
+						achievement.icon = await call<[string, string, number], string>("xenia_get_achievement_icon_user", user, title_id, achievement.icon_id) ?? '';
+					
+					// If not found retrieve from game ROM
+					if(!achievement.icon && rom)
+						achievement.icon = await call<[string, string, number], string>("xenia_get_achievement_icon_game", rom, title_id, achievement.icon_id) ?? '';
+					
+					// Create a locked grayscale version
+					if(achievement.icon)
+						achievement.locked_icon = await this.grayScaleIcon(achievement.icon);
+					else
+						achievement.locked_icon = '';
+				}
+
+				this.logger.debug(`${app_id} achievements: `, achievements);
+
+				if(achievements.achievements.length){
+					this._achievements[app_id] = { ...achievements };
+					delete (this._achievements[app_id] as any).progress;
+				}
+				else
+					this._achievements[app_id] = null;
 			}
-
-			this.logger.debug(`${app_id} achievements: `, achievements);
 
 			if(!achievements.achievements.length)
 				return undefined;
 
-			// Retrieve trophies icons and create grayscale versions for locked
-			for(let achievement of achievements.achievements){
-				// DEV: retrieve icon from user profile GPD first
-				//achievement.icon = await call<[string, string, string], string>("xenia_get_achievement_icon_user", user, trophy_id, trophy.id) ?? '';
-				
-				if(!achievement.icon && rom)
-					achievement.icon = await call<[string, string, number], string>("xenia_get_achievement_icon_game", rom, title_id, achievement.icon_id) ?? '';
-				
-				// Create a locked grayscale version
-				if(achievement.icon)
-					achievement.locked_icon = await this.grayScaleIcon(achievement.icon);
-				else
-					achievement.locked_icon = '';
+			// Retrieve progress if using cached data
+			if(!progressRetrieved && userAchievements){
+				let result = await call<[string, string], string>("xenia_get_all_achievements_status", user, title_id) ?? null;
+				achievements.progress = JSON.parse(result ?? '{}') as Record<number, XeniaAchievement>;
+				this.logger.debug(`${app_id} progress: `, achievements.progress);
 			}
-
-			this.logger.debug(`${app_id} progress: `, achievements.progress);
-
-			// DEV: check how many achievements in progress and if matches we can use those instead of querying the game rom
-
-			// DEV: retrieve rarity
+			else
+				this.logger.debug(`${app_id} no progress yet`);
 
 			this.store[app_id] = achievements;
 			return achievements;
@@ -177,7 +214,7 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 		return undefined;
 	}
 
-	protected processStore(store: XeniaGameAchievements){
+	protected processStore(store: XeniaGameAchievementsStats){
 		const defaultAchievements: AllAchievements = {
 			data: { achieved: {}, hidden: {}, unachieved: {} },
 			loading: false,
@@ -190,10 +227,19 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 
 		for(let achievement of store.achievements){
 			this.logger.debug('Achievement: ', achievement);
-			let achieved = achievement.flags?.earned === true;
+			let achieved = achievement.flags?.earned === true ||
+				achievement.flags?.earned_online === true;
 
-			// DEV: default rarity to Gamerpoints
+			// Default rarity to Gamerpoints, make an estimate
 			// https://github.com/justin-delano/PlayniteAchievements/blob/24b1bcab770277a645ef93f52795823739e0ae0e/source/Providers/Xenia/XeniaScanner.cs#L159
+			let achievedPerc = 0;
+			if(achievement.gamerscore > 0){
+				// Exponential decay model: P(GS) = 100 * e^(-0.023 * GS)
+				achievedPerc = 100.0 * Math.exp(-0.023 * achievement.gamerscore);
+
+				// Clamp output between 0.0% and 100.0%
+				achievedPerc = Math.max(0.0, Math.min(100.0, achievedPerc));
+			}
 
 			let unlocked: number;
 			if(achieved && store.progress?.[achievement.id]?.unlock_time){
@@ -211,7 +257,7 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 			const steam: SteamAppAchievement = {
 				bAchieved: achieved,
 				bHidden: achievement.flags?.secret === true,
-				flAchieved: 0, // Percentage of players who achieved (0-100)
+				flAchieved: achievedPerc, // Percentage of players who achieved (0-100)
 				flCurrentProgress: achieved ? 1 : 0, // Progress percentage of the player achievement (flMinProgress-flMaxProgress)
 				flMaxProgress: 1,
 				flMinProgress: 0,
@@ -255,7 +301,19 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 		{
 			this.errored = false;
 			let user = this.state.settings.xenia.user_path;
-			if (user && await call<[string], boolean>("xenia_check_user_path", user))
+			if(!user || !(await call<[string], boolean>("xenia_check_user_path", user))){
+				toaster.toast({
+					title: `[${this.getName()}]: ${this.t("title")}`,
+					body: this.t("noUser")
+				});
+			}
+			else if(!(await call<[], boolean>("xenia_check_wine_path"))){
+				toaster.toast({
+					title: `[${this.getName()}]: ${this.t("title")}`,
+					body: this.t("xeniaNoWine")
+				});
+			}
+			else
 			{
 				if (!this.globalLoading)
 				{
@@ -303,12 +361,6 @@ export class XeniaManager extends BaseManager<XeniaCacheData, XeniaGameAchieveme
 					this.processed = 0;
 					this.total = 0;
 				}
-			} else
-			{
-				toaster.toast({
-					title: `[${this.getName()}]: ${this.t("title")}`,
-					body: this.t("rpcs3NoUser")
-				});
 			}
 		} catch (e: any)
 		{

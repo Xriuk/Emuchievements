@@ -85,7 +85,8 @@ export default definePlugin(function ()
 	const t = getTranslateFunc();
 	const logger = new Logger("Index");
 	const state = new EmuchievementsState();
-	let lifetimeHook: Hook;
+	let appCloseLifetimeHook: Hook;
+	let overlayOpenLifetimeHook: Hook;
 
 	const eventBus = new EventBus();
 	const mountManager = new MountManager(eventBus, logger);
@@ -250,15 +251,21 @@ export default definePlugin(function ()
 		}
 	});
 
-	// Refresh achievements on app close
+	// Refresh achievements on overlay opened and app close
 	mountManager.addMount({
 		mount: function (): void
 		{
-			lifetimeHook = SteamClient.GameSessions.RegisterForAppLifetimeNotifications((update: {
-				unAppID: number;
-				nInstanceID: number;
-				bRunning: boolean;
-			}) =>
+			overlayOpenLifetimeHook = SteamClient.Overlay.RegisterForOverlayActivated((_, appId, active) => {
+				logger.debug("overlay", appId, active);
+				if(active && (appStore.GetAppOverviewByAppID(appId) as SteamAppOverview).app_type == 1073741824){
+					let manager = state.managers.find(m => m.isEnabled() && m.isSupported(appId));
+					if(manager){
+						manager.clearRuntimeCacheForAppId(appId);
+						manager.fetchAchievements(appId);
+					}
+				}
+			});
+			appCloseLifetimeHook = SteamClient.GameSessions.RegisterForAppLifetimeNotifications(update =>
 			{
 				logger.debug("lifetime", update);
 				if ((appStore.GetAppOverviewByAppID(update.unAppID) as SteamAppOverview).app_type == 1073741824)
@@ -276,11 +283,10 @@ export default definePlugin(function ()
 		},
 		unMount: function (): void
 		{
-			lifetimeHook?.unregister();
+			overlayOpenLifetimeHook?.unregister();
+			appCloseLifetimeHook?.unregister();
 		}
 	});
-
-	// DEV: add refresh achievements on overlay open
 
 	mountManager.addMount(patchAppPage(state));
 

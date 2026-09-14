@@ -20,11 +20,6 @@ type RPCS3TrophyStatus = {
 };
 
 type RPCS3GameTrophies = {
-	game?: {
-		name?: string;
-		detail?: string;
-		trophy_id?: string;
-	},
 	trophies: {
 		id: string;
 		hidden?: boolean;
@@ -34,18 +29,22 @@ type RPCS3GameTrophies = {
 
 		icon: string;
 		locked_icon: string;
-	}[],
-	user?: string,
-	progress?: Record<string, RPCS3TrophyStatus>,
-	rarity?: UserThinTrophy[]
+	}[];
+	rarity?: UserThinTrophy[];
+}
+
+type RPCS3GameTrophiesStats = RPCS3GameTrophies & {
+	progress?: Record<string, RPCS3TrophyStatus>
 };
 
 /**
  * Retrieves trophies from RPCS3 for installed games and folders, even not yet installed trophies
  * (for games which have not been run yet), and optionally retrieves trophies rarity from PSN
  */
-export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
+export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophiesStats>
 {
+	private _trophies: Record<number, RPCS3GameTrophies | null> = {};
+
 	private _psnTokens?: AuthTokensResponse;
 	private _psnTokensExpiration?: Date;
 
@@ -57,7 +56,13 @@ export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
 		return "rpcs3Cache" as const;
 	}
 
-	protected async getStoreForGame(app_id: number): Promise<RPCS3GameTrophies | undefined>
+	override clearCache(): void {
+		super.clearCache();
+
+		this._trophies = {};
+	}
+
+	protected async getStoreForGame(app_id: number): Promise<RPCS3GameTrophiesStats | undefined>
 	{
 		if (this.ids[app_id] === null && this.customIdsOverrides[app_id]?.rpcs3_trophy_id === null)
 			return undefined;
@@ -151,122 +156,131 @@ export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
 		let trophy_id: string | undefined | null = this.ids[app_id];
 		if (typeof trophy_id === "string" && trophy_id !== "")
 		{
-			// Try retrieving the trophies from the user directory first
-			let result = await call<[string, string], string>("rpcs3_get_all_trophies_user", user, trophy_id) ?? null;
-			let trophies = JSON.parse(result ?? '{}') as RPCS3GameTrophies;
+			let trophies: RPCS3GameTrophiesStats;
 
-			// If we found nothing we search the game folder
+			// Retrieve from cache first, since trophies data do not change
 			let gameTrophies = false; // True if retrieved from game folder (0 achieved)
-			if(!trophies.trophies.length){
-				let locale = this.state.settings.rpcs3.locale ?? 'en';
+			if(this._trophies[app_id] === null)
+				return undefined;
+			else if(this._trophies[app_id])
+				trophies = { ...this._trophies[app_id] };
+			else{
+				// Try retrieving the trophies from the user directory first
+				let result = await call<[string, string], string>("rpcs3_get_all_trophies_user", user, trophy_id) ?? null;
+				trophies = JSON.parse(result ?? '{}') as RPCS3GameTrophies;
 
-				if(romFolder)
-					result = await call<[string, string], string>("rpcs3_get_all_trophies_game", romFolder + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", locale.toLowerCase()) ?? null;
-				else if(gameId)
-					result = await call<[string, string], string>("rpcs3_get_all_trophies_game", this.getHddPath() + "game/" + gameId + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", locale.toLowerCase()) ?? null;
-				else
-					result = '';
+				// If we found nothing we search the game folder
+				if(!trophies.trophies.length){
+					let locale = this.state.settings.rpcs3.locale ?? 'en';
 
-				if(result){
-					trophies = JSON.parse(result ?? '{}') as RPCS3GameTrophies;
-					gameTrophies = true;
+					if(romFolder)
+						result = await call<[string, string], string>("rpcs3_get_all_trophies_game", romFolder + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", locale.toLowerCase()) ?? null;
+					else if(gameId)
+						result = await call<[string, string], string>("rpcs3_get_all_trophies_game", this.getHddPath() + "game/" + gameId + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", locale.toLowerCase()) ?? null;
+					else
+						result = '';
+
+					if(result){
+						trophies = JSON.parse(result ?? '{}') as RPCS3GameTrophies;
+						gameTrophies = true;
+					}
 				}
-			}
 
-			this.logger.debug(`${app_id} trophies: `, trophies);
+				// Retrieve trophies icons and create grayscale versions for locked
+				for(let trophy of trophies.trophies){
+					// Retrieve from user folder first, then default to game
+					if(!gameTrophies)
+						trophy.icon = await call<[string, string, string], string>("rpcs3_get_trophy_icon_user", user, trophy_id, trophy.id) ?? '';
+					
+					if(!trophy.icon){
+						if(romFolder)
+							trophy.icon = await call<[string, string], string>("rpcs3_get_trophy_icon_game", romFolder + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", trophy.id) ?? '';
+						else if(gameId)
+							trophy.icon = await call<[string, string], string>("rpcs3_get_trophy_icon_game", this.getHddPath() + "game/" + gameId + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", trophy.id) ?? '';
+					}
+					
+					// Create a locked grayscale version
+					if(trophy.icon)
+						trophy.locked_icon = await this.grayScaleIcon(trophy.icon);
+					else
+						trophy.locked_icon = '';
+				}
+
+				// Retrieve trophies rarity
+				if(this._psnTokens && await checkOnlineStatus()){
+					// Refresh the token if needed
+					if(this._psnTokensExpiration && new Date() >= this._psnTokensExpiration){
+						try{
+							this._psnTokens = await (await fetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth', {
+								method: 'POST',
+								headers: {
+									"Content-Type": "application/x-www-form-urlencoded",
+									Authorization: "Basic MDk1MTUxNTktNzIzNy00MzcwLTliNDAtMzgwNmU2N2MwODkxOnVjUGprYTV0bnRCMktxc1A="
+								},
+								body: new URLSearchParams({
+									refresh_token: this._psnTokens.refreshToken,
+									grant_type: "refresh_token",
+									token_format: "jwt",
+									scope: "psn:mobile.v2.core psn:clientapp"
+								}).toString()
+							})).json()
+						}
+						catch(e){
+							this.logger.debug(`${app_id} PSN token refresh error`, e);
+							toaster.toast({
+								title: `[${this.getName()}]: ${this.t("title")}`,
+								body: this.t("rpcs3ErrorNpSSo")
+							});
+							this._psnTokens = undefined;
+							this._psnTokensExpiration = undefined;
+						}
+					}
+
+					if(this._psnTokens){
+						// Try PSN accounts with most PS3 games/trophies in order (https://psnprofiles.com/leaderboard/ps3),
+						// since PSN API requires an account to see trophies rarity but the we have no official user here...
+						const psnAccounts = [
+							'69542030923328854',
+							'8477639012129454573',
+							'7390413838940571081'
+						];
+						for(let accountId of psnAccounts){
+							try{
+								// npServiceName=trophy: PS3 trophies
+								let rarity: Awaited<ReturnType<typeof getUserTrophiesEarnedForTitle>>  = await (await fetchNoCors(`https://m.np.playstation.com/api/trophy/v1/users/${accountId}/npCommunicationIds/${trophy_id}/trophyGroups/all/trophies?npServiceName=trophy`, {
+									headers: {
+										Authorization: `Bearer ${this._psnTokens.accessToken}`,
+										"Content-Type": "application/json",
+									},
+
+								})).json();
+								if(rarity.trophies.length){
+									trophies.rarity = rarity.trophies;
+									this.logger.debug(`${app_id} rarity: `, trophies.rarity);
+									break;
+								}
+							}
+							catch{ }
+						}
+					}
+				}
+
+				this.logger.debug(`${app_id} trophies: `, trophies);
+
+				this._trophies[app_id] = trophies.trophies.length ? { ...trophies } : null;
+			}
 
 			if(!trophies.trophies.length)
 				return undefined;
 
-			// Retrieve trophies icons and create grayscale versions for locked
-			for(let trophy of trophies.trophies){
-				trophy.icon = await call<[string, string, string], string>("rpcs3_get_trophy_icon_user", user, trophy_id, trophy.id) ?? '';
-				
-				if(!trophy.icon){
-					if(romFolder)
-						trophy.icon = await call<[string, string], string>("rpcs3_get_trophy_icon_game", romFolder + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", trophy.id) ?? '';
-					else if(gameId)
-						trophy.icon = await call<[string, string], string>("rpcs3_get_trophy_icon_game", this.getHddPath() + "game/" + gameId + "/TROPDIR/" + trophy_id + "/TROPHY.TRP", trophy.id) ?? '';
-				}
-				
-				// Create a locked grayscale version
-				if(trophy.icon)
-					trophy.locked_icon = await this.grayScaleIcon(trophy.icon);
-				else
-					trophy.locked_icon = '';
-			}
-
 			// Retrieve progress for non-game trophies (actually played)
 			if(!gameTrophies){
-				result = await call<[string, string], string>("rpcs3_get_all_trophies_status", user, trophy_id) ?? null;
+				let result = await call<[string, string], string>("rpcs3_get_all_trophies_status", user, trophy_id) ?? null;
 				trophies.progress = JSON.parse(result ?? '{}') as Record<string, RPCS3TrophyStatus>;
 				this.logger.debug(`${app_id} progress: `, trophies.progress);
 			}
 			else
 				this.logger.debug(`${app_id} no progress yet`);
-
-			// Retrieve trophies rarity
-			if(this._psnTokens && await checkOnlineStatus()){
-				// Refresh the token if needed
-				if(this._psnTokensExpiration && new Date() >= this._psnTokensExpiration){
-					try{
-						this._psnTokens = await (await fetchNoCors('https://ca.account.sony.com/api/authz/v3/oauth', {
-							method: 'POST',
-							headers: {
-								"Content-Type": "application/x-www-form-urlencoded",
-								Authorization: "Basic MDk1MTUxNTktNzIzNy00MzcwLTliNDAtMzgwNmU2N2MwODkxOnVjUGprYTV0bnRCMktxc1A="
-							},
-							body: new URLSearchParams({
-								refresh_token: this._psnTokens.refreshToken,
-								grant_type: "refresh_token",
-								token_format: "jwt",
-								scope: "psn:mobile.v2.core psn:clientapp"
-							}).toString()
-						})).json()
-					}
-					catch(e){
-						this.logger.debug(`${app_id} PSN token refresh error`, e);
-						toaster.toast({
-							title: `[${this.getName()}]: ${this.t("title")}`,
-							body: this.t("rpcs3ErrorNpSSo")
-						});
-						this._psnTokens = undefined;
-						this._psnTokensExpiration = undefined;
-					}
-				}
-
-				if(this._psnTokens){
-					// Try PSN accounts with most PS3 games/trophies in order (https://psnprofiles.com/leaderboard/ps3),
-					// since PSN API requires an account to see trophies rarity but the we have no official user here...
-					const psnAccounts = [
-						'69542030923328854',
-						'8477639012129454573',
-						'7390413838940571081'
-					];
-					for(let accountId of psnAccounts){
-						try{
-							// npServiceName=trophy: PS3 trophies
-							let rarity: Awaited<ReturnType<typeof getUserTrophiesEarnedForTitle>>  = await (await fetchNoCors(`https://m.np.playstation.com/api/trophy/v1/users/${accountId}/npCommunicationIds/${trophy_id}/trophyGroups/all/trophies?npServiceName=trophy`, {
-								headers: {
-									Authorization: `Bearer ${this._psnTokens.accessToken}`,
-									"Content-Type": "application/json",
-								},
-
-							})).json();
-							if(rarity.trophies.length){
-								trophies.rarity = rarity.trophies;
-								this.logger.debug(`${app_id} rarity: `, trophies.rarity);
-								break;
-							}
-						}
-						catch{ }
-					}
-				}
-			}
-
-			trophies.game ??= {};
-			trophies.game.trophy_id = trophy_id;
-			trophies.user = user;
 
 			this.store[app_id] = trophies;
 			return trophies;
@@ -275,7 +289,7 @@ export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
 		return undefined;
 	}
 
-	protected processStore(store: RPCS3GameTrophies){
+	protected processStore(store: RPCS3GameTrophiesStats){
 		const defaultAchievements: AllAchievements = {
 			data: { achieved: {}, hidden: {}, unachieved: {} },
 			loading: false,
@@ -499,7 +513,7 @@ export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophies>
 			{
 				toaster.toast({
 					title: `[${this.getName()}]: ${this.t("title")}`,
-					body: this.t("rpcs3NoUser")
+					body: this.t("noUser")
 				});
 			}
 		} catch (e: any)

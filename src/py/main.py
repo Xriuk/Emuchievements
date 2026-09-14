@@ -444,6 +444,9 @@ class Plugin:
 		return json.dumps(parsed_states)
 
 
+	async def xenia_check_wine_path(self) -> bool:
+		return os.path.isfile(os.path.join(decky_plugin.HOME, ".local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine"))
+
 	async def xenia_check_user_path(self, user_path: str) -> bool:
 		return os.path.isfile(user_path + "/Account")
 
@@ -531,8 +534,8 @@ class Plugin:
 				return result
 			
 		return None
-
-	async def xenia_get_titleid(self, iso_path: str) -> str:
+	
+	async def xenia_get_titleid_game(self, iso_path: str) -> str:
 		def titleid_filter(xex_bytes, key, value):
 			# 0x00040006 = Execution ID, 06 x 4 = 24 bytes
 			if key == 0x00040006:
@@ -754,14 +757,13 @@ class Plugin:
 
 		return json.dumps(result)
 
-	async def xenia_get_achievement_icon_game(self, iso_path: str, title_id: str, icon_id: int) -> str:
+	async def xenia_get_achievement_icon_xdbf(self, xdbf_bytes: bytes, icon_id: int) -> str:
 		def icon_predicate(xdbf_bytes, ns, id, offset, size):
 			if ns == 2 and id == icon_id:
 				return xdbf_bytes[offset:offset + size]
 			else:
 				return None
-		
-		xdbf_bytes = await Plugin.xenia_get_spaxdbf(self, iso_path, title_id)
+
 		if xdbf_bytes is None:
 			return ''
 
@@ -771,6 +773,12 @@ class Plugin:
 		else:
 			encoded_string = base64.b64encode(icon_bytes).decode('utf-8')
 			return "data:image/png;base64," + encoded_string
+
+	async def xenia_get_achievement_icon_user(self, user_path: str, title_id: str, icon_id: int) -> str:		
+		return await Plugin.xenia_get_achievement_icon_xdbf(self, await Plugin.xenia_get_game_gpdxbdf(self, user_path, title_id), icon_id)
+
+	async def xenia_get_achievement_icon_game(self, iso_path: str, title_id: str, icon_id: int) -> str:
+		return await Plugin.xenia_get_achievement_icon_xdbf(self,  await Plugin.xenia_get_spaxdbf(self, iso_path, title_id), icon_id)
 
 	# entry_namespace:
 	# 1 Achievement
@@ -792,26 +800,26 @@ class Plugin:
 	async def xenia_get_all_achievements_status(self, user_path: str, title_id: str) -> str:
 		def achievements_predicate(xdbf_bytes, ns, id, offset, size):
 			# https://github.com/justin-delano/PlayniteAchievements/blob/f778a5a6d673b9cb766bc83c0074f9d8bd0c1761/source/Providers/Xenia/GPDResolver.cs#L124-L127
-			if ns == 1 and len(size >= 28):
+			if ns == 1 and size >= 28:
 				id, icon_id, gamerscore, flags, unlock_time = struct.unpack(">IIIIQ", xdbf_bytes[offset+4:offset+4+24])
 				
 				start = offset + 4 + 24
 				end = start
 				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
 					end += 2
-				name = xdbf_bytes[start:end].decode('utf-8')
+				name = xdbf_bytes[start:end].decode('utf-16-be')
 
 				start = end + 2
 				end = start
 				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
 					end += 2
-				description_achieved = xdbf_bytes[start:end].decode('utf-8')
+				description_achieved = xdbf_bytes[start:end].decode('utf-16-be')
 
 				start = end + 2
 				end = start
 				while xdbf_bytes[end:end+2] != b'\x00\x00' and end < offset + size:
 					end += 2
-				description_unachieved = xdbf_bytes[start:end].decode('utf-8')
+				description_unachieved = xdbf_bytes[start:end].decode('utf-16-be')
 
 				return {
 					'id': id,
@@ -831,7 +839,7 @@ class Plugin:
 		
 		xdbf_bytes = await Plugin.xenia_get_game_gpdxbdf(self, user_path, title_id)
 		if xdbf_bytes is None:
-			return json_dumps(parsed_states)
+			return json.dumps(parsed_states)
 
 		# Retrieve achievements data
 		achievements = await Plugin.xenia_parse_xdbf_all(self, xdbf_bytes, achievements_predicate)
