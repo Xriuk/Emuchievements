@@ -22,7 +22,7 @@ export type RetroAchievementsData = {
 	enabled?: boolean, // defaults to true
 	username: string,
 	api_key: string,
-	logged_in?: boolean,
+	logged_in?: boolean
 };
 
 export const RPCS3_USER_PATH_DEFAULT = "/home/deck/Emulation/storage/rpcs3/dev_hdd0/home/00000001";

@@ -85,15 +85,6 @@ class Plugin:
 			return config
 
 	async def hash(self, path: str) -> str:
-		# lib = ctypes.CDLL(f"{helpers.get_homebrew_path(helpers.get_home_path(helpers.get_user()))}/plugins/{plugin}/bin/Emuchievements.so")
-		# hash = lib.hash
-		# hash.argtypes = [ctypes.c_char_p]
-		# hash.restype = ctypes.c_char_p
-		# return hash(path.encode('utf-8'))
-
-		# return os.popen(
-		# 	f"'{os.path.join(decky_plugin.DECKY_PLUGIN_DIR, 'bin', 'hash')}' \"{path}\"").read().strip()
-
 		logger.debug(f"Hashing ROM: {path}")
 		try:
 			# Fix PyInstaller Library Issue as Per: https://github.com/xXJSONDeruloXx/Decky-Framegen/
@@ -549,7 +540,7 @@ class Plugin:
 		xex_bytes = await Plugin.xenia_get_defaultxex(self, iso_path)
 		if xex_bytes is None:
 			return None
-		return await Plugin.xenia_parse_xex(self, iso_path, titleid_filter)
+		return await Plugin.xenia_parse_xex(self, xex_bytes, titleid_filter)
 
 	# entry_namespace:
 	# 1 Metadata (check id = 1480672072 / XACH)

@@ -405,7 +405,7 @@ export class RPCS3Manager extends BaseManager<RPCS3CacheData, RPCS3GameTrophiesS
 								},
 								allow_redirects: false
 							});
-						if(!accessCodeResponse.success || !accessCodeResponse.result.headers["Location"]?.includes("?code=")){
+						if(!accessCodeResponse.success || typeof accessCodeResponse.result === 'string' || !accessCodeResponse.result?.headers["Location"]?.includes("?code=")){
 							throw new Error(`
 								There was a problem retrieving your PSN access code. Is your NPSSO code valid?
 								To get a new NPSSO code, visit https://ca.account.sony.com/api/v1/ssocookie.`);

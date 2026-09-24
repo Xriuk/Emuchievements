@@ -63,7 +63,7 @@ declare global
 	let DeckyPluginLoader: {
 		legacyFetchNoCors(url: string, request?: DeckyRequestInit | any): Promise<{
 			success: boolean;
-			result: { status: number; headers: { [key: string]: string }; body: string } | any
+			result: { status: number; headers: { [key: string]: string }; body: string } | string | undefined
 		}>
 	}
 }
@@ -146,8 +146,8 @@ export default definePlugin(function ()
 					{
 						// @ts-ignore
 						if (state.settings.general.store_category &&
-							state.managers.some(m => m.isReady((this as SteamAppOverview).appid)) &&
-							args[0] === StoreCategory.Achievements)
+							args[0] === StoreCategory.Achievements &&
+							state.managers.some(m => m.isReady((this as SteamAppOverview).appid)))
 						{
 							return true;
 						}

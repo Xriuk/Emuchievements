@@ -1,15 +1,10 @@
-Decky Loader Steam Deck Plugin for viewing RetroAchievements and RPCS3 and Xenia progress.
+Decky Loader Steam Deck and Steam Machine Plugin for viewing metadata for Non-Steam games. Supports RetroAchievements, RPCS3 and Xenia, and many more coming soon.
 
 ## Building
 
 ```bash
-
 pnpm i # Installs dependencies
-
-pnpm package # Builds installable zip file
-
-pnpm start # deploys to your deck if you have your vscode config set up for deployment (developer thing)
-
+decky plugin build # Builds installable zip file
 ```
 
 vscode and intellj IDEA run configs are included

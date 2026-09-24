@@ -16,7 +16,7 @@ import { getAllNonSteamAppIds } from "../steam-utils";
 import { runInAction } from "mobx";
 import Logger from "../logger";
 
-export const SettingsButton: VFC = () =>
+const SettingsButton: VFC = () =>
 {
 	const t = useTranslations();
 
@@ -37,7 +37,7 @@ export const SettingsButton: VFC = () =>
 	);
 };
 
-export const RefreshButton: VFC = () =>
+const RefreshButton: VFC = () =>
 {
 	const t = useTranslations();
 	const { refresh } = useEmuchievementsState();
@@ -80,7 +80,7 @@ async function clearNonSteamAchivements(){
 	});
 }
 
-export const CacheButton: VFC = () =>
+const CacheButton: VFC = () =>
 {
 	const t = useTranslations();
 	const { managers: achievementManagers } = useEmuchievementsState();
@@ -105,7 +105,7 @@ export const CacheButton: VFC = () =>
 	);
 };
 
-export const LoadingProgressBar: VFC = () =>
+const LoadingProgressBar: VFC = () =>
 {
 	const t = useTranslations();
 	const { loadingData } = useEmuchievementsState();
@@ -140,7 +140,7 @@ export const LoadingProgressBar: VFC = () =>
 	</>;
 };
 
-export const GameList: VFC = () =>
+const GameList: VFC = () =>
 {
 	const { apps, managers: achievementManagers } = useEmuchievementsState();
 	const [appIds, setAppIds] = useState<number[]>();
@@ -165,8 +165,8 @@ export const GameList: VFC = () =>
 						childrenLayout="below"
 						onActivate={() =>
 						{
-							Navigation.Navigate(`/library/app/${appId}/achievements/my/individual`);
 							Navigation.CloseSideMenus();
+							Navigation.Navigate(`/library/app/${appId}/achievements/my/individual`);
 						}}>
 						<ProgressBar
 							focusable={false}

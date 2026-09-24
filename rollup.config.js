@@ -5,7 +5,6 @@ import replace from '@rollup/plugin-replace';
 import typescript from '@rollup/plugin-typescript';
 import {defineConfig} from 'rollup';
 import importAssets from 'rollup-plugin-import-assets';
-
 import {name} from "./plugin.json";
 import {version} from "./package.json";
 import {createPathTransform} from "rollup-sourcemap-path-transform";
@@ -67,4 +66,3 @@ export default defineConfig({
 		exports: 'default',
 	},
 });
-

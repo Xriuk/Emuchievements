@@ -54,6 +54,7 @@ const Markdown: FC<MarkdownProps> = (props) =>
 								onOKButton={() =>
 								{
 									props.onDismiss?.();
+									Navigation.CloseSideMenus();
 									Navigation.NavigateToExternalWeb(aRef.current!.href);
 								}}
 								style={{ display: 'inline' }}
@@ -339,23 +340,11 @@ const RPCS3Settings: VFC = () => {
 	const t = useTranslations();
 	const { loadingData, settings } = useEmuchievementsState();
 
-	const [rpcs3Data , setRpcs3Data] = useState({
-		enabled: false,
-		path: '',
-		locale: '',
-		prefixes: false,
-		npsso: ''
-	});
-
-	useEffect(() => {
-		setRpcs3Data({
-			enabled: settings.rpcs3.enabled ?? true,
-			path: settings.rpcs3.user_path ?? RPCS3_USER_PATH_DEFAULT,
-			locale: settings.rpcs3.locale ?? 'en',
-			prefixes: settings.rpcs3.show_cat_prefixes ?? true,
-			npsso: settings.rpcs3.npsso ?? ''
-		})
-	}, [settings.rpcs3.enabled, settings.rpcs3.user_path, settings.rpcs3.locale, settings.rpcs3.show_cat_prefixes, settings.rpcs3.npsso]);
+	const [enabled, setEnabled] = useState(settings.rpcs3.enabled ?? true);
+	const [path, setPath] = useState(settings.rpcs3.user_path ?? RPCS3_USER_PATH_DEFAULT);
+	const [locale, setLocale] = useState(settings.rpcs3.locale ?? 'en');
+	const [prefixes, setPrefixes] = useState(settings.rpcs3.show_cat_prefixes ?? true);
+	const [npsso, setNpsso] = useState(settings.rpcs3.npsso ?? '');
 
 	const markdown = t("rpcs3UserPathDescription") + "  \n" + 
 		t("rpcs3UserPathInstructions") + "  \n" + 
@@ -366,12 +355,9 @@ const RPCS3Settings: VFC = () => {
 		<DialogControlsSection>
 			<Field label={t("settingsEnabled")}>
 				<Toggle
-					value={rpcs3Data.enabled}
+					value={enabled}
 					onChange={async (checked) => {
-						setRpcs3Data(value => ({
-							...value,
-							enabled: checked
-						}));
+						setEnabled(checked);
 						settings.rpcs3.enabled = checked;
 						await settings.writeSettings();
 					}}/>
@@ -385,13 +371,10 @@ const RPCS3Settings: VFC = () => {
 				description={
 					<>
 						<TextField
-							value={rpcs3Data.path}
+							value={path}
 							disabled={loadingData.globalLoading}
 							onChange={async (event) => {
-								setRpcs3Data(value => ({
-									...value,
-									path: event.target.value
-								}));
+								setPath(event.target.value);
 								settings.rpcs3.user_path = event.target.value;
 								await settings.writeSettings();
 							}}/>
@@ -401,13 +384,10 @@ const RPCS3Settings: VFC = () => {
 				<DialogButton
 					disabled={loadingData.globalLoading}
 					onClick={async () => {
-						let result = await openFilePicker(FileSelectionType.FOLDER, rpcs3Data.path && rpcs3Data.path != RPCS3_USER_PATH_DEFAULT ? rpcs3Data.path : '/home', true, true, undefined, undefined, true, true);
-						let path = result.path ?? '';
-						setRpcs3Data(value => ({
-							...value,
-							path: path
-						}));
-						settings.rpcs3.user_path = path;
+						let result = await openFilePicker(FileSelectionType.FOLDER, path && path != RPCS3_USER_PATH_DEFAULT ? path : '/home', true, true, undefined, undefined, true, true);
+						let resultPath = result.path ?? '';
+						setPath(resultPath);
+						settings.rpcs3.user_path = resultPath;
 						await settings.writeSettings();
 					}}>
 					{t("browse")}
@@ -418,13 +398,10 @@ const RPCS3Settings: VFC = () => {
 				description={
 					<>
 						<TextField
-							value={rpcs3Data.locale}
+							value={locale}
 							disabled={loadingData.globalLoading}
 							onChange={async (event) => {
-								setRpcs3Data(value => ({
-									...value,
-									locale: event.target.value
-								}));
+								setLocale(event.target.value);
 								settings.rpcs3.locale = event.target.value;
 								await settings.writeSettings();
 							}}/>
@@ -436,12 +413,9 @@ const RPCS3Settings: VFC = () => {
 				label={t("rpcs3TrophiesCatPrefixes")}
 				description={t("rpcs3TrophiesCatPrefixesDescription")}>
 				<Toggle
-					value={rpcs3Data.prefixes}
+					value={prefixes}
 					onChange={async (checked) => {
-						setRpcs3Data(value => ({
-							...value,
-							prefixes: checked
-						}));
+						setPrefixes(checked);
 						settings.rpcs3.show_cat_prefixes = checked;
 						await settings.writeSettings();
 					}}/>
@@ -454,13 +428,10 @@ const RPCS3Settings: VFC = () => {
 				label={t("rpcs3PSNAPIToken")}
 				description={
 					<TextField
-						value={rpcs3Data.npsso}
+						value={npsso}
 						disabled={loadingData.globalLoading}
 						onChange={async (event) => {
-							setRpcs3Data(value => ({
-								...value,
-								npsso: event.target.value
-							}));
+							setNpsso(event.target.value);
 							settings.rpcs3.npsso = event.target.value;
 							await settings.writeSettings();
 						}}/>

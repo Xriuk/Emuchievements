@@ -16,9 +16,9 @@ import { BaseManager, loadingFetchedAchievements, romRegex } from "./Manager";
 
 export interface AchievementsData
 {
-	game: GameInfoAndUserProgress,
-	last_updated_at: Date,
-	game_id: number,
+	game: GameInfoAndUserProgress;
+	last_updated_at: Date;
+	game_id: number;
 	md5: string;
 }
 
@@ -183,10 +183,16 @@ export class RetroAchievementsManager extends BaseManager<CacheData, Achievement
 							md5: hash,
 							last_updated_at: new Date(),
 						};
+
+						// If we have no achievements we might have no sets despite the game existing on RA,
+						// So we won't query it further
 						if (Object.keys(result.game?.achievements)?.length == 0)
 						{
+							this.ids[app_id] = null;
+							await this.saveCache();
 							return undefined;
 						}
+
 						this.store[app_id] = result;
 						this.logger.debug(`${app_id} result:`, result);
 						return result;

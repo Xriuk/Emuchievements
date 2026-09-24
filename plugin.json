@@ -4,8 +4,8 @@
   "api_version": 1,
   "flags": [],
   "publish": {
-    "tags": ["EmuDeck", "retroachievements"],
-    "description": "Plugin for viewing RetroAchievements progress. Part of the EmuDeck Project",
+    "tags": ["EmuDeck", "RetroAchievements", "RPCS3", "Xenia"],
+    "description": "Plugin for viewing achievements for Non-Steam games. Part of the EmuDeck Project.",
     "image": "https://opengraph.githubassets.com/1/EmuDeck/Emuchievements"
   }
 }
