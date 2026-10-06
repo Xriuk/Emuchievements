@@ -1,3 +1,10 @@
+# Migrated to MetaDeck
+
+> [!WARNING]
+> This project has been integrated and migrated to [MetaDeck](https://github.com/Xriuk/MetaDeck), any future update and release will be posted there!
+
+-----
+
 Decky Loader Steam Deck and Steam Machine Plugin for viewing metadata for Non-Steam games. Supports RetroAchievements, RPCS3 and Xenia, and many more coming soon.
 
 ## Building
